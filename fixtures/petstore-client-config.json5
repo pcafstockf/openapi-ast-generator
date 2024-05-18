@@ -1,0 +1,23 @@
+{
+	// This file is parsed as a JSON5 file.
+	"cmdline": {
+		"i": "./fixtures/openapi-petstore.json",
+		"o": "./test-out/client",
+		"d": "all",
+		"b": "./test-out/client/petstore.bundle.json",
+		"X": [
+			"pathdefs"
+		],
+		"l": [
+		],
+		"p": [
+		]
+	},
+	"codeGenConfig": {
+		role: 'client',
+		apiIntfDir: 'apis',
+		apiImplDir: 'services',
+		implSuffix: 'srvc',
+		implFileSuffix: 'srvc'
+	}
+}

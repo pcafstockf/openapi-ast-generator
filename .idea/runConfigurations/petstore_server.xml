@@ -1,0 +1,5 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="petstore-server" type="NodeJSConfigurationType" application-parameters="-v -c fixtures/petstore-server-config.json5" path-to-node="$USER_HOME$/.nvm/versions/node/v16.20.2/bin/node" node-parameters="--require source-map-support/register  --require ts-node/register/transpile-only " path-to-js-file="src/cli.ts" working-dir="$PROJECT_DIR$">
+    <method v="2" />
+  </configuration>
+</component>
