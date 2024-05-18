@@ -69,4 +69,10 @@ Generating an Angular based client is first on my list.
 After that I will likely develop a Fastify server based on `fastify-openapi-glue` (and / or maybe just plain `Fastify`).
 If I do implement the native Fastify approach, the OpenApi spec used for input will need to be >= v3.1, so I can use Json Schema.  
 `express-openapi-validator` seems pretty popular, so that might be something I pursue.  
+Webpacking this project to a single file standalone cli tool is also high on my list.  
 Lets see how all that goes, and perhaps a version 2 will support a Java Jakarta EE server and a C++ client.
+
+## Warning
+Currently I have tsconfig setup such that all top level files are covered.  
+This is a little funky, but allows we to generate clients and servers within this project and quickly verify / test their code.  
+Before this project moves to v1.0, I will alter tsconfig to be more traditional.
