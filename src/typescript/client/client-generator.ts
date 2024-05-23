@@ -1,5 +1,5 @@
 import {mkdirSync, readFileSync} from 'fs';
-import {findLastIndex} from 'lodash';
+import {findLastIndex, template as lodashTemplate} from 'lodash';
 import {writeFileSync} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -17,19 +17,11 @@ export class TsClientGenerator extends TsMorphBase {
 	generate(doc: Project): Project {
 		const apiIntfFiles: SourceFile[] = [];
 		const modelIntfFiles: SourceFile[] = [];
-		let diSetupSf: SourceFile;
-		const di = this.config.dependencyInjection;
-		if (di.apiBinding) {
-			diSetupSf = doc.createSourceFile(path.join(codeGenConfig.outputDirectory, codeGenConfig.apiImplDir, 'setup.ts'), `export function setup(${di.apiBinding.binderName}: ${di.apiBinding.binderType}, httpClient: HttpClient): void {${os.EOL}}`, {overwrite: true});
-			di.apiBinding.bindingImport.forEach(i => diSetupSf.addImportDeclaration(i));
-			const imports = ['HttpClient', 'ApiHttpClientToken'];
-			diSetupSf.addImportDeclaration({
-				moduleSpecifier: this.config.support.dstDirName,
-				namedImports: imports
-			});
-			const setupFn = diSetupSf.getFunction('setup');
-			setupFn.setBodyText(interpolateBashStyle(di.apiBinding.httpBindingStatement, {binderName: di.apiBinding.binderName}));
-		}
+		const di = this.config.di[this.config.dependencyInjection];
+		const diSetupApis = new Map<ApiTag, {
+			intf: InterfaceDeclaration,
+			impl: ClassDeclaration
+		}>();
 		doc.getSourceFiles().forEach(v => {
 			v.getInterfaces().forEach((i) => {
 				const methods = i.getMethods();
@@ -42,8 +34,7 @@ export class TsClientGenerator extends TsMorphBase {
 					if (di) {
 						// Each API interface should define a DI token that the API implementation will be bound to
 						di.intfImport.forEach(i => v.addImportDeclaration(i));
-						if (diSetupSf)
-							importIfNotSameFile(diSetupSf, i, i.getName() + 'Token');
+						diSetupApis.set(i.$ast as ApiTag, {intf: i, impl: undefined});
 						di.apiIntfTokens?.forEach(tok => {
 							let varName = interpolateBashStyle(tok.name_Tmpl, {intfName: i.getName(), oaeName: (i.$ast as ApiTag).oae.name});
 							let varInitializer = interpolateBashStyle(tok.initializer_Tmpl || '', {intfName: i.getName(), intfLabel: i.getName(), oaeName: (i.$ast as ApiTag).oae.name, varName: varName});
@@ -66,8 +57,9 @@ export class TsClientGenerator extends TsMorphBase {
 				this.ensureInternalDirImport(c);
 				const api = c.$ast as ApiTag;
 				const intfName = api.getIdentifier('intf');
-				const tsIntf = c.getImplements().find(i => i.getText() === intfName);
+				const implName = api.getIdentifier('impl');
 				if (di) {
+					diSetupApis.get(api).impl = c;
 					di.implImport?.forEach(i => v.addImportDeclaration(i));
 					if (di.apiIntfTokens) {
 						const apiImportDecl = v.getImportDeclaration(c => !!c.getNamedImports().find(i => i.getName() === intfName));
@@ -77,16 +69,13 @@ export class TsClientGenerator extends TsMorphBase {
 						});
 					}
 					di.apiConstruction.implDecorator.forEach(d => {
-						c.addDecorator({
-							name: d.name,
-							arguments: d.arguments ?? []
-						});
+						c.addDecorator(d);
 					});
 					const idx = findLastIndex(v.getStatements(), (n: any) => {
 						return n.isKind(SyntaxKind.ImportDeclaration);
 					});
 					di.apiImplTokens?.forEach(tok => {
-						let varName = interpolateBashStyle(tok.name_Tmpl, {intfName: intfName});
+						let varName = interpolateBashStyle(tok.name_Tmpl, {implName: implName});
 						let varInitializer = interpolateBashStyle(tok.initializer_Tmpl || '', {intfLabel: intfName});
 						v.insertVariableStatement(idx + 1, {
 							declarationKind: VariableDeclarationKind.Const,
@@ -102,12 +91,6 @@ export class TsClientGenerator extends TsMorphBase {
 				c.getMethods().forEach((m) => {
 					this.enhanceClassMethod(m);
 				});
-				if (diSetupSf) {
-					importIfNotSameFile(diSetupSf, c, c.getName());
-					const setupFn = diSetupSf.getFunction('setup');
-					let newTxt = setupFn.getBodyText() + os.EOL + interpolateBashStyle(di.apiBinding.apiBindingStatement, {intfName: intfName, implName: c.getName(), binderName: di.apiBinding.binderName});
-					setupFn.setBodyText(newTxt);
-				}
 			});
 		});
 		if (apiIntfFiles.length > 0) {
@@ -126,6 +109,29 @@ export class TsClientGenerator extends TsMorphBase {
 		}
 		if (this.config.support?.dstDirName)
 			this.ensureInternalSupportFiles(doc);
+		if (di) {
+			const intfTokensExt = di.apiIntfTokens.map(i => interpolateBashStyle(i.name_Tmpl, {intfName: ''}));
+			const confTokensExt = di.apiImplTokens.map(i => interpolateBashStyle(i.name_Tmpl, {implName: ''}));
+			const setupTemplate = lodashTemplate(di.apiSetup);
+			const setupTxt = setupTemplate({
+				intfTokensExt,
+				confTokensExt,
+				apis: Array.from(diSetupApis.keys())
+			}).trim();
+			const diSetupSf = doc.createSourceFile(path.join(codeGenConfig.outputDirectory, codeGenConfig.apiImplDir, 'setup.ts'), setupTxt, {overwrite: true});
+			// To difficult for the template to know where the interfaces are, so we import those ourselves.
+			const imports = ['HttpClient as ApiHttpClient', 'ApiHttpClientToken', 'ApiClientConfig'];
+			diSetupSf.addImportDeclaration({
+				moduleSpecifier: this.config.support.dstDirName,
+				namedImports: imports
+			});
+			diSetupApis.forEach(({intf, impl}) => {
+				const intfImport = importIfNotSameFile(diSetupSf, intf, intf.getName());
+				intfTokensExt.forEach(ext => intfImport.addNamedImport(intf.getName() + ext));
+				const implImport = importIfNotSameFile(diSetupSf, impl, impl.getName());
+				confTokensExt.forEach(ext => implImport.addNamedImport(impl.getName() + ext));
+			});
+		}
 
 		doc.getSourceFiles().forEach(v => {
 			const mappings = this.captureAstMappings(v);
@@ -142,6 +148,7 @@ export class TsClientGenerator extends TsMorphBase {
 		const internalDir = path.normalize(path.join(codeGenConfig.outputDirectory, globalThis.codeGenConfig.apiIntfDir, this.config.support.dstDirName));
 		mkdirSync(internalDir, {recursive: true});
 		this.config.support.files.forEach(fp => {
+			fp = interpolateBashStyle(fp, {lib: this.config.httplib ?? 'fetch'})
 			const srcFilePath = path.normalize(path.join(this.config.support.srcDirName, fp));
 			dstPath = path.join(internalDir, path.basename(srcFilePath));
 			if (!safeLStatSync(dstPath)) {
@@ -173,19 +180,17 @@ export class TsClientGenerator extends TsMorphBase {
 				{name: 'configuration', type: 'ApiClientConfig', hasQuestionToken: true, scope: Scope.Protected}
 			]
 		});
-		if (this.config.dependencyInjection.apiConstruction) {
+		const di = this.config.di[this.config.dependencyInjection];
+		if (di.apiConstruction) {
 			const api = c.$ast as ApiTag;
 			const params = impl.getParameters();
-			this.config.dependencyInjection.apiConstruction.httpClientInject?.forEach((d => {
-				params[0].addDecorator({
-					name: d.name,
-					arguments: d.arguments ?? []
-				});
+			di.apiConstruction.httpClientInject?.forEach((d => {
+				params[0].addDecorator(d);
 			}));
-			this.config.dependencyInjection.apiConstruction.apiConfigInject?.forEach((d => {
+			di.apiConstruction.apiConfigInject?.forEach((d => {
 				params[1].addDecorator({
 					name: d.name,
-					arguments: d.arguments?.map(a => interpolateBashStyle(a, {intfName: api.getIdentifier('intf')})) ?? []
+					arguments: d.arguments.map(a => interpolateBashStyle(a, {implName: c.getName()}))
 				});
 			}));
 		}

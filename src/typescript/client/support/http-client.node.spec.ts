@@ -1,9 +1,9 @@
 // noinspection HttpUrlsUsage
 
-import {HttpClient} from "./http-client";
-import FormData from "form-data";
-import {gunzip, gzip} from "zlib";
-import * as util from "util";
+import FormData from 'form-data';
+import * as util from 'util';
+import {gunzip, gzip} from 'zlib';
+import {HttpClient} from './http-client';
 import {makeNodeHttpClient} from './http-client.node';
 
 const asyncGzip = util.promisify(gzip);
@@ -24,7 +24,7 @@ describe('Http Client', () => {
 		jasmine.DEFAULT_TIMEOUT_INTERVAL = originalTimeout;
 	});
 	beforeEach(async () => {
-		client = makeNodeHttpClient()
+		client = makeNodeHttpClient();
 	});
 	it('head w/ 200', async () => {
 		const url = 'http://httpbin.org/ip';

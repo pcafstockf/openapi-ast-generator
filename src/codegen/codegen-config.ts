@@ -14,10 +14,10 @@ export const BaseCodeGenConfig = {
 	modelIntfDir: 'models',  // if truthy, generate model interfaces
 	modelImplDir: null as string,  // if truthy, generate model classes
 	modelPrivDir: null as string,  // if falsy, modelImplDir will be used when/if needed.
-	apiIntfDir: 'api',  // if truthy, generate api interfaces
-	apiImplDir: 'api-impl',  // if truthy, generate api classes
+	apiIntfDir: 'apis',  // if truthy, generate api interfaces
+	apiImplDir: 'services',  // if truthy, generate api classes
 	apiPrivDir: null as string, // if falsy, apiImplDir will be used when/if needed.
-	apiHndlDir: null as string, // only relevant for server side generators.
+	apiHndlDir: 'handlers', // Ignored if the role is not 'server'.
 
 	// How should identifiers and files be cased?
 	intfNameCasing: 'pascal' as NameCase,
@@ -33,11 +33,11 @@ export const BaseCodeGenConfig = {
 	intfPrefix: '',
 	intfSuffix: '',
 	implPrefix: '',
-	implSuffix: 'impl',
+	implSuffix: 'srvc',
 	hndlSuffix: 'handler',
 	intfFileSuffix: '',
-	implFileSuffix: '-impl',
-	hndlFileSuffix: '-handler',
+	implFileSuffix: 'srvc',
+	hndlFileSuffix: 'handler',
 	// Fine-grained control over how identifiers are named
 	intfName_Tmpl: `#{name} #{typeSuffix} #{intfSuffix}`,
 	implName_Tmpl: '#{name} #{typeSuffix} #{implSuffix}',
@@ -82,7 +82,8 @@ export const ClientCodeGenConfig = {
 		],
 		libs: {
 			xml: undefined
-		}
+		},
+		httplib: 'fetch' as unknown as ('fetch' | 'node' | 'axios' | 'angular')
 	}
 };
 
@@ -112,50 +113,112 @@ export const TsMorphCodeGenConfig = {
 					files: [
 						`client-utils.ts`,
 						`http-client.ts`,
-						`http-client.axios.ts`,
-						`http-client.node.ts`,
+						`http-client.#{lib}.ts`,
 						`index.ts`,
 					]
 				},
-				dependencyInjection: {
-					// This is my project ;-) so by default I'm promoting the best TypeScript DI!
-					intfImport: [{
-						moduleSpecifier: 'async-injection',
-						namedImports: ['InjectionToken']
-					}],
-					implImport: [{
-						moduleSpecifier: 'async-injection',
-						namedImports: ['Injectable', 'Inject', 'Optional', 'InjectableId']
-					}],
-					apiIntfTokens: [{
-						name_Tmpl: '#{intfName}Token',
-						initializer_Tmpl: 'new InjectionToken<#{intfName}>(\'#{intfLabel}\')'
-					}],
-					apiImplTokens: [{
-						name_Tmpl: '#{intfName}ConfigToken',
-						initializer_Tmpl: 'Symbol.for(\'#{intfLabel}ClientConfig\') as InjectableId<ApiClientConfig>'
-					}],
-					apiConstruction: {
-						implDecorator: [{
-							name: 'Injectable'
-						}],
-						httpClientInject: [
-							{name: 'Inject', arguments: ['ApiHttpClientToken']}
-						],
-						apiConfigInject: [
-							{name: 'Inject', arguments: ['#{intfName}ConfigToken']},
-							{name: 'Optional'}
-						]
-					},
-					apiBinding: {
-						bindingImport: [{
+				dependencyInjection: 'async-injection' as unknown as ('async-injection' | 'angular'),
+				di: {
+					'async-injection': {
+						// This is my project ;-) so by default I'm promoting the best TypeScript DI!
+						intfImport: [{
 							moduleSpecifier: 'async-injection',
-							namedImports: ['Container']
+							namedImports: ['InjectionToken']
 						}],
-						binderName: 'di',
-						binderType: 'Container',
-						httpBindingStatement: 'if (! #{binderName}.isIdKnown(ApiHttpClientToken)) #{binderName}.bindConstant(ApiHttpClientToken, httpClient)',
-						apiBindingStatement: 'if (! #{binderName}.isIdKnown(#{intfName}Token)) #{binderName}.bindClass(#{intfName}Token, #{implName}).asSingleton();'
+						implImport: [{
+							moduleSpecifier: 'async-injection',
+							namedImports: ['Injectable', 'Inject', 'Optional', 'InjectableId']
+						}],
+						apiIntfTokens: [{
+							name_Tmpl: '#{intfName}Token',
+							initializer_Tmpl: 'new InjectionToken<#{intfName}>(\'#{intfLabel}\')'
+						}],
+						apiImplTokens: [{
+							name_Tmpl: '#{implName}ConfigToken',
+							initializer_Tmpl: 'Symbol.for(\'#{intfLabel}ClientConfig\') as InjectableId<ApiClientConfig>'
+						}],
+						apiConstruction: {
+							implDecorator: [{
+								name: 'Injectable',
+								arguments: []
+							}],
+							httpClientInject: [
+								{name: 'Inject', arguments: ['ApiHttpClientToken']}
+							],
+							apiConfigInject: [
+								{name: 'Inject', arguments: ['#{implName}ConfigToken']},
+								{name: 'Optional', arguments: []}
+							]
+						},
+						// Really tried to avoid templating, but given the differences in DI impls, this lodash template was unavoidable.
+						// NOTE: Relative imports are more difficult to determine, so the code handles importing the Token and Class.
+						apiSetup: `import { Container } from 'async-injection';
+							export function setup(di: Container, httpClient: ApiHttpClient): void {
+								if (!di.isIdKnown(ApiHttpClientToken)) 
+									di.bindConstant(ApiHttpClientToken, httpClient);<% apis.forEach(function(api) { %>
+								if (!di.isIdKnown(<%- api.getIdentifier('intf') %><%- intfTokensExt %>)) 
+									di.bindClass(<%- api.getIdentifier('intf') %><%- intfTokensExt %>, <%- api.getIdentifier('impl') %>).asSingleton();<% }); %>
+							}
+						`
+					},
+					'angular': {
+						intfImport: [{
+							moduleSpecifier: '@angular/core',
+							namedImports: ['InjectionToken']
+						}],
+						implImport: [{
+							moduleSpecifier: '@angular/core',
+							namedImports: ['Inject', 'Injectable', 'Optional', 'InjectionToken']
+						}],
+						apiIntfTokens: [{
+							name_Tmpl: '#{intfName}Token',
+							initializer_Tmpl: 'new InjectionToken<#{intfName}>(\'#{intfLabel}\')'
+						}],
+						apiImplTokens: [{
+							name_Tmpl: '#{implName}ConfigToken',
+							initializer_Tmpl: 'new InjectionToken<ApiClientConfig>(\'#{intfLabel}ClientConfig\')'
+						}],
+						apiConstruction: {
+							implDecorator: [{
+								name: 'Injectable',
+								arguments: []
+							}],
+							httpClientInject: [
+								{name: 'Inject', arguments: ['ApiHttpClientToken']}
+							],
+							apiConfigInject: [
+								{name: 'Inject', arguments: ['#{implName}ConfigToken']},
+								{name: 'Optional', arguments: []}
+							]
+						},
+						// might need useValue
+						apiSetup: `
+							import { NgModule, ModuleWithProviders, SkipSelf, Optional } from '@angular/core';
+							import {HttpClientModule, HttpClient} from "@angular/common/http";
+							@NgModule({
+							  imports:      [HttpClientModule],
+							  declarations: [],
+							  exports:      [],
+							  providers: [<% apis.forEach(function(api) { %>
+							    { provide: <%- api.getIdentifier('intf') %><%- intfTokensExt %>, useClass: <%- api.getIdentifier('impl') %> },<% }); %>
+							  ]
+							})
+							export class ApiModule {
+							    public static forRoot(httpClientFcty: (angularHttpClient: HttpClient) => ApiHttpClient, apiConfFcty: (key: string) => ApiClientConfig): ModuleWithProviders<ApiModule> {
+							        return {
+							            ngModule: ApiModule,
+							            providers: [<% apis.forEach(function(api) { %>
+							                { provide: <%- api.getIdentifier('impl') %><%- confTokensExt %>, useFactory: apiConfFcty, deps: ["<%- api.getIdentifier('intf') %>"]},<% }); %>
+							                { provide: ApiHttpClientToken, useFactory: httpClientFcty, deps: [HttpClient] } 
+							            ]
+							        };
+							    }
+							    constructor( @Optional() @SkipSelf() parentModule: ApiModule) {
+							        if (parentModule)
+							            throw new Error('ApiModule is already loaded. Import in your base AppModule only.');
+							    }
+							}
+						`
 					}
 				}
 			},
@@ -208,33 +271,34 @@ export const TsMorphCodeGenConfig = {
 						`http-response.ts`
 					]
 				},
-				dependencyInjection: {
-					// This is my project ;-) so by default I'm promoting the best TypeScript DI!
-					intfImport: [{
-						moduleSpecifier: 'async-injection',
-						namedImports: ['InjectionToken']
-					}],
-					implImport: [{
-						moduleSpecifier: 'async-injection',
-						namedImports: ['Injectable', 'Inject']
-					}],
-					apiIntfTokens: [{
-						name_Tmpl: '#{intfName}Token',
-						initializer_Tmpl: 'new InjectionToken<#{intfName}>(\'#{intfLabel}\')'
-					}],
-					apiConstruction: {
-						implDecorator: [{
-							name: 'Injectable'
-						}]
-					},
-					apiBinding: {
-						bindingImport: [{
+				dependencyInjection: 'async-injection' as unknown as ('async-injection'),
+				di: {
+					'async-injection': {
+						// This is my project ;-) so by default I'm promoting the best TypeScript DI!
+						intfImport: [{
 							moduleSpecifier: 'async-injection',
-							namedImports: ['Container']
+							namedImports: ['InjectionToken']
 						}],
-						binderName: 'di',
-						binderType: 'Container',
-						apiBindingStatement: 'if (! #{binderName}.isIdKnown(#{intfName}Token)) #{binderName}.bindClass(#{intfName}Token, #{implName}).asSingleton();'
+						implImport: [{
+							moduleSpecifier: 'async-injection',
+							namedImports: ['Injectable', 'Inject']
+						}],
+						apiIntfTokens: [{
+							name_Tmpl: '#{intfName}Token',
+							initializer_Tmpl: 'new InjectionToken<#{intfName}>(\'#{intfLabel}\')'
+						}],
+						apiConstruction: {
+							implDecorator: [{
+								name: 'Injectable',
+								arguments: []
+							}]
+						},
+						apiSetup: `import { Container } from 'async-injection';
+							export function setup(di: Container): void {<% apis.forEach(function(api) { %>
+								if (!di.isIdKnown(<%- api.getIdentifier('intf') %>Token)) 
+									di.bindClass(<%- api.getIdentifier('intf') %>Token, <%- api.getIdentifier('impl') %>).asSingleton();<% }); %>
+							}
+						`
 					}
 				}
 			}
@@ -248,10 +312,8 @@ const DefaultCodeGenConfig = merge(merge(merge(merge(cloneDeep(BaseCodeGenConfig
 
 type BaseCodeGenConfigType = Partial<typeof BaseCodeGenConfig> & Partial<typeof ClientCodeGenConfig>;
 
-function CodeGenConfig(config: BaseCodeGenConfigType) {
+function CodeGenConfig() {
 	return {
-		...config,
-
 		loadConfigObject(config: object) {
 			if (config && typeof config === 'object') {
 				config = JSON.parse(JSON.stringify(config));     // Lame attempt at avoiding exploits.
@@ -359,5 +421,5 @@ function CodeGenConfig(config: BaseCodeGenConfigType) {
 export type CodeGenConfig<T extends BaseCodeGenConfigType = BaseCodeGenConfigType> = T & ReturnType<typeof CodeGenConfig>;
 
 export function makeCodeGenConfig<T extends BaseCodeGenConfigType = BaseCodeGenConfigType>(config?: T): CodeGenConfig {
-	return Object.setPrototypeOf(CodeGenConfig(config ?? {}), DefaultCodeGenConfig);
+	return Object.setPrototypeOf(CodeGenConfig(), merge(DefaultCodeGenConfig, config));
 }

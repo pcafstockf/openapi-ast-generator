@@ -40,7 +40,8 @@ export class TsMorphGenerator extends TsMorphBase {
 			doc.apis.forEach(a => {
 				this.resolveApi(a, 'intf');
 				this.resolveApi(a, 'impl');
-				this.resolveApi(a, 'hndl');
+				if (codeGenConfig.role === 'server')
+					this.resolveApi(a, 'hndl');
 			});
 			this.project.getSourceFiles().forEach(v => {
 				if (Object.is(this.tempFile, v)) {

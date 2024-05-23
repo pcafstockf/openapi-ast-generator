@@ -14,7 +14,8 @@
 		"target": "es2020",
 		"lib": [
 			/* Specify a set of bundled library declaration files that describe the target runtime environment. */
-			"es2020"
+			"es2020",
+			"dom"
 		],
 		// "jsx": "preserve",                                /* Specify what JSX code is generated. */
 		"experimentalDecorators": true,

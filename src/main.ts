@@ -23,11 +23,15 @@ declare global {
 	var codeGenConfig: CodeGenConfig;
 }
 
-interface CLIOptionsBase<IN, OUT, DELETE, CONFIG, STRICT, MERGE, BUNDLE, PROP, ELEVATE, EXCLUDE, VERBOSE> {
+interface CLIOptionsBase<IN, ROLE, OUT, DELETE, CONFIG, STRICT, MERGE, BUNDLE, PROP, ELEVATE, EXCLUDE, VERBOSE> {
 	/**
 	 * OpenAPI input document (file or url)
 	 */
 	i: IN,
+	/**
+	 * Are we generating client code, or server code.
+	 */
+	r: ROLE,
 	/**
 	 * Directory for output of generated code.
 	 */
@@ -71,7 +75,7 @@ interface CLIOptionsBase<IN, OUT, DELETE, CONFIG, STRICT, MERGE, BUNDLE, PROP, E
 }
 
 // First make them all optional, then below we will add back the two we absolutely require.
-type PartialCLIOptionsType = Partial<CLIOptionsBase<string, string, string, string, boolean, string[], string, string[], boolean, string[], boolean>>;
+type PartialCLIOptionsType = Partial<CLIOptionsBase<string, string, string, string, string, boolean, string[], string, string[], boolean, string[], boolean>>;
 
 /**
  * The actual (language neutral) interface of all the cli options for the generator.
@@ -81,8 +85,9 @@ export type CLIOptionsType = PartialCLIOptionsType & Required<Pick<PartialCLIOpt
 /**
  * Defined as a yargs compatible structure, this constant should be parsable by other (non-node) environments to their own native argument parsing library.
  */
-export const CLIOptionsDefinition = <CLIOptionsBase<Options, Options, Options, Options, Options, Options, Options, Options, Options, Options, Options>>{
+export const CLIOptionsDefinition = <CLIOptionsBase<Options, Options, Options, Options, Options, Options, Options, Options, Options, Options, Options, Options>>{
 	i: {alias: 'in', normalize: true, type: 'string', nargs: 1, identifier: 'OpenAPI description'},
+	r: {alias: 'role', type: 'string', string: true, number: false, choices: ['client', 'server'], identifier: 'Generated code is calling, or providing an API'},
 	o: {alias: 'out', normalize: true, type: 'string', nargs: 1, identifier: 'Directory for output of generated code.'},
 	d: {alias: 'delete', type: 'string', string: true, number: false, choices: ['all', 'gen'], identifier: 'Delete all files (support, server impl, etc.) or only model/api'},
 	c: {alias: 'config', normalize: true, type: 'string', nargs: 1, identifier: 'JSON file containing commands and config overrides'},
@@ -206,6 +211,10 @@ export async function prepare(args: CLIOptionsType) {
 	doc = await docProcessor.internalize(config.cmdLine.i, doc);
 
 	globalThis.codeGenConfig = makeCodeGenConfig(config.codeGenConfig);
+	if (config.cmdLine.r === 'server')
+		globalThis.codeGenConfig.role = config.cmdLine.r;
+	else if (config.cmdLine.r === 'client')
+		globalThis.codeGenConfig.role = config.cmdLine.r;
 	if (config.cmdLine.p)
 		globalThis.codeGenConfig.loadConfigArgs(config.cmdLine.p);
 	globalThis.codeGenConfig.outputDirectory = path.resolve(config.cmdLine.o);

@@ -11,7 +11,7 @@ export interface HttpResponse<T = string | ArrayBuffer | object | number | boole
  * Generic Http Client Request Options.
  */
 export interface HttpOptions {
-	headers?: Record<string, string>;
+	headers?: Record<string, string | string[]>;
 	withCredentials?: boolean;
 }
 

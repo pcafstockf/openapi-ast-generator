@@ -15,6 +15,10 @@ Unlike traditional Ast and even OpenApi itself, these Ast nodes are **interfaces
 They expose methods to operate on data, but how they store that data is up to them.  
 To simplify, we will refer to these Ast interfaces as the "`CodeGenAst`"
 
+## Configuration / Customization
+The code produced by openapi-ast-generator is highly customizable and configuration driven
+(explained in greater detail below).
+
 ## Transformation
 
 The **first processing pipeline** is a preparation step that processes command line options, cleans, consolidates, and optimizes an OpenApi specification document.
@@ -27,6 +31,7 @@ that a subclass can use to provide a logical transformation into the `CodeGenAst
 An `OpenApiTSMorphAstTransformer` class inherits from `OpenApiAstVisitor`.
 As the OpenApi specification is visited, this class builds the `CodeGenAst`, **BUT**, the **implementation** of those interfaces utilizes ts-morph to store the data.
 In other words, a `Model` produced by `OpenApiTSMorphAstTransformer` will (internally) contain a reference to a ts-morph `InterfaceDeclaration` (and perhaps `ClassDeclaration`).  
+This is where the file structure begins to take place.  ts-morph Interfaces and Classes for various aspects of the Models and Apis are assigned into configurable locations.
 Moreover, those ts-morph structures will have an `$ast` property set that is a reference back to the `CodeGenAst`.  
 
 At this stage, we have ts-morph nodes that reference back to appropriate `CodeGenAst` nodes, which reference back to appropriate OpenApi data structures.
@@ -38,8 +43,12 @@ The **third pipeline** is meant to add personality to the ts-morph based `CodeGe
 This is where you produce client vs server specific code.  
 You might for instance add a constructor to your `Api` implementation class, 
 or add a dependency injection constant to your `Api` interface, 
-or enhance `Method` with signature overloads, an appropriate body, etc.
-This is done by walking the ts-morph structure of the code, referencing back to the `CodeGenAst` and even the OpenApi data structures as needed for code generation.
+or enhance `Method` with signature overloads, an appropriate body, etc.  
+This is done by walking the ts-morph structure of the code, referencing back to the `CodeGenAst` and even the OpenApi data structures as needed for code generation.  
+This pipeline is highly dependent on the configuration you provide (all have defaults that you can override).  
+Wherever possible, configuration is defined as ts-morph compatible `Structures`. 
+However in some cases, implementations (especially for certain framework / library targets) just can't be generically addressed with ts-morph structures. 
+In these scenarios the configuration falls back to simple lodash templates to augment code generation as a last resort.
 
 This is a highly configurable tool because most developers have strong feelings about generated code.  :-)  
 Personally, I feel that if generated code performs the simple task assign to it, I don't really care what it looks like, or even if I have to jump through some hoops to fit it into my project. It's works and I did not have to spend time on it.  

@@ -1,4 +1,5 @@
 import {mkdirSync, readFileSync} from 'fs';
+import {template as lodashTemplate} from 'lodash';
 import {writeFileSync} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -32,12 +33,11 @@ export class TsServerGenerator extends TsMorphBase {
 		const modelIntfFiles: SourceFile[] = [];
 		const apiHndlFiles: SourceFile[] = [];
 		const models: Record<string, InterfaceDeclaration> = {};
-		let diSetupSf: SourceFile;
-		const di = this.config.dependencyInjection;
-		if (di.apiBinding) {
-			diSetupSf = doc.createSourceFile(path.join(codeGenConfig.outputDirectory, codeGenConfig.apiImplDir, 'setup.ts'), `export function setup(${di.apiBinding.binderName}: ${di.apiBinding.binderType}): void {${os.EOL}}`, {overwrite: true});
-			di.apiBinding.bindingImport.forEach(i => diSetupSf.addImportDeclaration(i));
-		}
+		const diSetupApis = new Map<ApiTag, {
+			intf: ClassDeclaration,
+			impl: ClassDeclaration
+		}>();
+		const di = this.config.di[this.config.dependencyInjection];
 		doc.getSourceFiles().forEach(v => {
 			v.getInterfaces().forEach(i => {
 				if (i.getMethods().length === 0) {
@@ -71,18 +71,10 @@ export class TsServerGenerator extends TsMorphBase {
 							moduleSpecifier: this.config.framework,
 							namedImports: [this.confCtx.type]
 						});
-						if (diSetupSf) {
-							importIfNotSameFile(diSetupSf, c, c.getName());
-							const setupFn = diSetupSf.getFunction('setup');
-							let newTxt = setupFn.getBodyText() + os.EOL + interpolateBashStyle(di.apiBinding.apiBindingStatement, {intfName: intfName, implName: c.getName(), binderName: di.apiBinding.binderName});
-							setupFn.setBodyText(newTxt);
-						}
 						if (di) {
+							diSetupApis.set(api, {intf: undefined, impl: c});
 							di.apiConstruction.implDecorator.forEach(d => {
-								c.addDecorator({
-									name: d.name,
-									arguments: d.arguments ?? []
-								});
+								c.addDecorator(d);
 							});
 							di.implImport?.forEach(i => v.addImportDeclaration(i));
 							if (di.apiIntfTokens) {
@@ -111,8 +103,7 @@ export class TsServerGenerator extends TsMorphBase {
 					const clazz = this.interfaceToAbsClass(i);
 					if (di) {
 						di.intfImport?.forEach(i => v.addImportDeclaration(i));
-						if (diSetupSf)
-							importIfNotSameFile(diSetupSf, clazz, clazz.getName() + 'Token');
+						diSetupApis.get(api).intf = clazz;
 						di.apiIntfTokens?.forEach(tok => {
 							let varName = interpolateBashStyle(tok.name_Tmpl, {intfName: clazz.getName(), oaeName: (clazz.$ast as ApiTag).oae.name});
 							let varInitializer = interpolateBashStyle(tok.initializer_Tmpl || '', {intfName: clazz.getName(), intfLabel: clazz.getName(), oaeName: (clazz.$ast as ApiTag).oae.name, varName: varName});
@@ -150,6 +141,20 @@ export class TsServerGenerator extends TsMorphBase {
 				return p;
 			}, ``);
 			doc.createSourceFile(path.join(codeGenConfig.outputDirectory, codeGenConfig.modelIntfDir, 'index.ts'), indexTs, {overwrite: true});
+		}
+		if (di) {
+			const intfTokensExt = di.apiIntfTokens.map(i => interpolateBashStyle(i.name_Tmpl, {intfName: ''}));
+			const setupTemplate = lodashTemplate(di.apiSetup);
+			const setupTxt = setupTemplate({
+				intfTokensExt,
+				apis: Array.from(diSetupApis.keys())
+			}).trim();
+			const diSetupSf = doc.createSourceFile(path.join(codeGenConfig.outputDirectory, codeGenConfig.apiImplDir, 'setup.ts'), setupTxt, {overwrite: true});
+			diSetupApis.forEach(({intf, impl}) => {
+				const intfImport = importIfNotSameFile(diSetupSf, intf, intf.getName());
+				intfTokensExt.forEach(ext => intfImport.addNamedImport(intf.getName() + ext));
+				importIfNotSameFile(diSetupSf, impl, impl.getName());
+			});
 		}
 
 		if (this.config.support?.dstDirName)
