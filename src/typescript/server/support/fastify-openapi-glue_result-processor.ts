@@ -1,4 +1,5 @@
 import {FastifyReply, FastifyRequest} from 'fastify';
+import {mock} from 'mock-json-schema';
 import {HttpResponse} from './http-response';
 
 /**
@@ -7,6 +8,42 @@ import {HttpResponse} from './http-response';
 export interface Context {
 	request: FastifyRequest;
 	response: FastifyReply
+}
+
+/**
+ * This is directly lifted out of the most excellent openapi-backend package (which FYI, also has Fastify support).
+ * In fact the whole idea of returning a mock based on the response schema (using mock-json-schema), comes from openapi-backend.
+ */
+function findDefaultStatusCodeMatch(obj: object) {
+	// 1. check for a 20X response
+	for (const ok of [200, 201, 202, 203, 204]) {
+		if (obj[ok]) {
+			return {
+				status: ok,
+				res: obj[ok],
+			};
+		}
+	}
+	// 2. check for a 2XX response
+	if (obj['2XX']) {
+		return {
+			status: 200,
+			res: obj['2XX'],
+		};
+	}
+	// 3. check for the "default" response
+	if ((obj as any).default) {
+		return {
+			status: 200,
+			res: (obj as any).default,
+		};
+	}
+	// 4. pick first response code in list
+	const code = Object.keys(obj)[0];
+	return {
+		status: Number(code),
+		res: obj[code],
+	};
 }
 
 /**
@@ -21,21 +58,34 @@ export interface Context {
  *  <li>Throw null | undefined to indicate the 'next' handler in the chain should be called with no args.
  * </ul>
  */
-export function processApiResult<T>(result: Promise<HttpResponse<T>> | null, res: FastifyReply) {
+export function processApiResult<T>(req: FastifyRequest, result: Promise<HttpResponse<T>> | null, res: FastifyReply) {
 	if (typeof result === 'object' && (result instanceof Promise || typeof (result as any)?.then === 'function')) {
-		result.then(r => {
+		return result.then(r => {
 			if (r) {
+				if (r.headers && typeof r.headers === 'object')
+					res.headers(r.headers);
+				res.status(r.status ?? 200);
+				if (typeof r.data === 'undefined')
+					return res.send();
+				else
+					return res.send(r.data);
 			}
 			// else, remember that undefined means its been handled and we should do nothing.
-		}).catch(err => {
-			//URGENT: How do we propagate to the next handler in fastify?
-			// if (!err)
-			// 	next();
-			// else
-			// 	next(err);
 		});
 	}
 	else {
-		return res.status(501).send();
+		let rspStatus = 501;
+		let rspData = undefined;
+		if (req.routeOptions.schema.response) {
+			const {status, res} = findDefaultStatusCodeMatch(req.routeOptions.schema.response as object);
+			if (typeof status === 'number')
+				rspStatus = status;
+			if (res)
+				rspData = mock(res);
+		}
+		res.status(rspStatus);
+		if (rspData)
+			return res.send(rspData);
+		return res.send();
 	}
 }

@@ -1,4 +1,5 @@
 import {lstatSync, PathLike, Stats} from 'fs';
+import {transform as lodashTransform, omit as lodashOmit} from 'lodash';
 
 
 /**
@@ -20,4 +21,24 @@ export function safeLStatSync(path: PathLike): Stats {
 	catch {
 		return undefined as any;
 	}
+}
+
+/**
+ * Clone an object deeply while omitting the specified properties from the clone.
+ */
+export function omitDeep<T extends object, K extends (string | number | symbol)>(obj: T, keysToOmit: K[]) {
+	return lodashTransform(lodashOmit(obj, keysToOmit) as any, (result: Record<K, any>, value: any, key: K) => {
+		if (value && typeof value === 'object') {
+			if (Array.isArray(value))
+				result[key] = value.map(v => {
+					if (v && typeof v === 'object')
+						return omitDeep(lodashOmit(v, keysToOmit), keysToOmit)
+					return v;
+				})
+			else
+				result[key] = omitDeep(lodashOmit(value, keysToOmit), keysToOmit);
+		} else {
+			result[key] = value;
+		}
+	}, {} as any) as T;
 }

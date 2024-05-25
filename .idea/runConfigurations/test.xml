@@ -1,5 +1,5 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="test" type="NodeJSConfigurationType" application-parameters="--config=./jasmine.json" path-to-node="node" node-parameters="--require source-map-support/register  --require ts-node/register/transpile-only  --require tsconfig-paths/register" path-to-js-file="node_modules/jasmine/bin/jasmine.js" working-dir="$PROJECT_DIR$">
+  <configuration default="false" name="test" type="NodeJSConfigurationType" application-parameters="--config=./jasmine.json" node-parameters="--require source-map-support/register  --require ts-node/register/transpile-only  --require tsconfig-paths/register" path-to-js-file="node_modules/jasmine/bin/jasmine.js" working-dir="$PROJECT_DIR$">
     <envs>
       <env name="TS_NODE_PROJECT" value="tsconfig.json" />
     </envs>

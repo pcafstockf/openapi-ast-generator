@@ -7,7 +7,7 @@ import {ClassDeclaration, InterfaceDeclaration, JSDocStructure, MethodDeclaratio
 import {ApiTag} from '../../lang-neutral/api-tag';
 import {MethodOperation} from '../../lang-neutral/method-operation';
 import {TypeSchema} from '../../lang-neutral/type-schema';
-import {interpolateBashStyle, safeLStatSync} from '../../shared';
+import {interpolateBashStyle, omitDeep, safeLStatSync} from '../../shared';
 import {importIfNotSameFile, TsMorphBase} from '../../ts-morph/base';
 import {bindAst} from '../../ts-morph/ts-morph-ext';
 
@@ -171,10 +171,10 @@ export class TsServerGenerator extends TsMorphBase {
 			}]
 		});
 		const cast = this.framework.hndl.cast ? ` as unknown as ${this.framework.hndl.cast}` : '';
-		fn.setBodyText(`return {}${cast}`);
+		fn.setBodyText(`return {}${cast};`);
 		const retStat = fn.getStatements()[0].asKind(SyntaxKind.ReturnStatement);
 		const retExp = retStat.getExpression().asKind(SyntaxKind.AsExpression);
-		const objLit = retExp.getExpression().asKind(SyntaxKind.AsExpression).getExpression().asKind(SyntaxKind.ObjectLiteralExpression);
+		const objLit = retExp ? retExp.getExpression().asKind(SyntaxKind.AsExpression).getExpression().asKind(SyntaxKind.ObjectLiteralExpression) : retStat.getExpression().asKind(SyntaxKind.ObjectLiteralExpression);
 
 		importIfNotSameFile(fn, intf, intf.getName());
 		const intfDir = path.relative(path.join(codeGenConfig.outputDirectory, codeGenConfig.apiHndlDir), path.join(codeGenConfig.outputDirectory, codeGenConfig.apiIntfDir));
@@ -184,6 +184,18 @@ export class TsServerGenerator extends TsMorphBase {
 			namedImports: i.namedImports
 		}}).forEach(i => sf.addImportDeclaration(i));
 
+		// By the time we get here, it is difficult to retrieve the original return types of the API methods.
+		// So, we just pull in everything that the interface itself needed and let source code reformat / cleanup deal with extras.
+		const intfSF = intf.getSourceFile();
+		intfSF.getImportDeclarations().forEach(i => {
+			const s = i.getStructure();
+			if (s.moduleSpecifier.startsWith('.')) {
+				sf.addImportDeclaration({
+					moduleSpecifier: path.relative(intfDir, s.moduleSpecifier),
+					namedImports: s.namedImports
+				});
+			}
+		});
 		return objLit;
 	}
 
@@ -215,7 +227,8 @@ export class TsServerGenerator extends TsMorphBase {
 
 	protected enhanceInterfaceMethod(intf: MethodSignature) {
 		const method = intf.$ast;
-		const methodReturnType = intf.getReturnTypeNode().$ast;
+		const baseReturnTypeNode = intf.getReturnTypeNode();
+		const methodReturnType = baseReturnTypeNode.$ast;
 		const struct = intf.getStructure();
 		const parent = intf.getParent() as InterfaceDeclaration;
 		intf.remove(); // We need the return type to be promise
@@ -230,7 +243,8 @@ export class TsServerGenerator extends TsMorphBase {
 
 	protected enhanceClassMethod(impl: MethodDeclaration) {
 		const method = impl.$ast;
-		const methodReturnType = impl.getReturnTypeNode().$ast;
+		const baseReturnTypeNode = impl.getReturnTypeNode();
+		const methodReturnType = baseReturnTypeNode.$ast;
 		const struct = impl.getStructure() as MethodDeclarationStructure;
 		const parent = impl.getParent() as ClassDeclaration;
 		impl.remove(); // We need the return type to be promise
@@ -247,18 +261,19 @@ export class TsServerGenerator extends TsMorphBase {
 			returnType: `Promise<HttpResponse<${struct.returnType}>>`
 		});
 		implMethod.setHasOverrideKeyword(true);
-		implMethod.setIsAsync(this.framework.stubReturn.trim() !== 'null');
 		bindAst(implMethod, method);
 		bindAst(implMethod.getReturnTypeNode(), methodReturnType);
 		this.addCtxParamToMethod(implMethod, this.framework.context.type);
-		implMethod.setBodyText(`return ${this.framework.stubReturn};`);
+		let retValStr = this.framework.stubReturn;
+		implMethod.setIsAsync(retValStr.trim() !== 'null');
+		implMethod.setBodyText(`return ${retValStr};`);
 		return implMethod;
 	}
 
 	protected createAdapterMethod(adapter: ObjectLiteralExpression, intf: MethodSignature, models: Record<string, InterfaceDeclaration>) {
 		const method = intf.$ast;
 		const resolver = this.framework.hndl.lookup;
-		const genericParams = {body: 'never', path: [], query: [], header: [], cookie: [], apiInvocation: undefined};
+		const genericParams = {body: 'never', path: [], query: [], header: [], cookie: [], reply: 'never', apiInvocation: undefined};
 		genericParams.apiInvocation = intf.getParameters().reduce((s, p, idx) => {
 			let ref: string;
 			const oap = method.parameters[idx];
@@ -288,10 +303,17 @@ export class TsServerGenerator extends TsMorphBase {
 					genericParams[key] = `{${genericParams[key].join(',')}}`;
 			}
 		});
+		// A little funky...
+		// We should import the return type, but its been mangled by the time we get here.
+		// This was addressed by importing everything the api imports, so we can get away with just inserting the type as text.
+		const rtTxt = intf.getReturnTypeNode()?.getText();
+		if (rtTxt && rtTxt !== 'void')
+			genericParams.reply = rtTxt;
 
+		const initTxt = interpolateBashStyle(this.framework.hndl.body, genericParams);
 		const operationId = adapter.addPropertyAssignment({
 			name: intf.getName(),
-			initializer: interpolateBashStyle(this.framework.hndl.body, genericParams)
+			initializer: initTxt
 		});
 		bindAst(operationId, method);
 		const arrowFn = operationId.getInitializer().asKind(SyntaxKind.ArrowFunction);

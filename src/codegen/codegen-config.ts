@@ -271,7 +271,7 @@ export const TsMorphCodeGenConfig = {
 					hndl: {
 						imphorts: [{
 							moduleSpecifier: 'fastify',
-							namedImports: ['FastifyRequest']
+							namedImports: ['FastifyRequest', 'FastifyReply']
 						},{
 							moduleSpecifier: '#{internal}',
 							namedImports: ['Context', 'processApiResult']
@@ -283,10 +283,10 @@ export const TsMorphCodeGenConfig = {
 							header: 'req.headers',
 							cookie: '(req.cookies as {[key: string]: string})'   // This presumes the presence of @fastify/cookie
 						},
-						body: `(req: FastifyRequest<Body: #{body}, Params: #{path}, Querystring: #{query}, Headers: #{header}, Reply: #{reply}>, rsp: FastifyReply) => {
+						body: `(req: FastifyRequest<{Body: #{body}, Params: #{path}, Querystring: #{query}, Headers: #{header}, Reply: #{reply}}>, rsp: FastifyReply) => {
 						\tconst ctx = {request: req, response: rsp};
-						\tconst result = #{result};
-						\treturn processApiResult(result, res, next);
+						\tconst result = #{apiInvocation};
+						\treturn processApiResult(req, result, rsp);
 						}`,
 						cast: undefined as unknown as string
 					}
