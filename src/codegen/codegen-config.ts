@@ -224,17 +224,27 @@ export const TsMorphCodeGenConfig = {
 			},
 			server: {
 				// The framework should actually be the npm package name.
-				framework: 'openapi-backend' as ('openapi-backend' | 'express-openapi-validator' | 'fastify-openapi-glue'),
-				webserver: 'express' as ('express' | 'fastify'),
-				stubReturn: 'null',
-				context: {
-					'openapi-backend': {
+				framework: 'openapi-backend' as ('openapi-backend' | 'express-openapi-validator' | 'fastify-openapi-glue' | 'fastify-native'),
+				'openapi-backend': {
+					stubReturn: 'null',
+					context: {
+						type: 'Context',
+						imphorts: [{
+							moduleSpecifier: 'openapi-backend',
+							namedImports: ['Context']
+						}],
+					},
+					hndl: {
 						imphorts: [{
 							moduleSpecifier: 'openapi-backend',
 							namedImports: ['Context', 'Handler']
+						},{
+							moduleSpecifier: 'express',
+							namedImports: ['Request', 'Response', 'NextFunction']
+						},{
+							moduleSpecifier: '#{internal}',
+							namedImports: ['processApiResult']
 						}],
-						type: 'Context',
-						generic: 'Context<#{body}, #{path}, #{query}, #{header}, #{cookie}>',
 						lookup: {
 							body: 'ctx.request.requestBody',
 							query: 'ctx.request.query',
@@ -242,21 +252,43 @@ export const TsMorphCodeGenConfig = {
 							header: 'ctx.request.headers',
 							cookie: 'ctx.request.cookies'
 						},
-						hndlsType: '{[operationId: string]: Handler;}'
-					},
+						body: `(ctx: Context<#{body}, #{path}, #{query}, #{header}, #{cookie}>, _: Request, res: Response, next: NextFunction) => {
+						\tconst result = #{apiInvocation};
+						\treturn processApiResult(ctx as unknown as Context, result, res, next);
+						}`,
+						cast: '{[operationId: string]: Handler;}'
+					}
 				},
-				hndlTmpls: {
-					express: {
+				'fastify-openapi-glue': {
+					stubReturn: 'null',
+					context: {
+						type: 'Context',
 						imphorts: [{
-							moduleSpecifier: 'express',
-							namedImports: ['Request', 'Response', 'NextFunction']
+							moduleSpecifier: '#{internal}',
+							namedImports: ['Context']
 						}],
-						hndlParams: {
-							'_': 'Request',
-							res: 'Response',
-							next: 'NextFunction'
+					},
+					hndl: {
+						imphorts: [{
+							moduleSpecifier: 'fastify',
+							namedImports: ['FastifyRequest']
+						},{
+							moduleSpecifier: '#{internal}',
+							namedImports: ['Context', 'processApiResult']
+						}],
+						lookup: {
+							body: 'req.body',
+							query: 'req.query',
+							path: 'req.params',
+							header: 'req.headers',
+							cookie: '(req.cookies as {[key: string]: string})'   // This presumes the presence of @fastify/cookie
 						},
-						hndlBody: `const result = null;${os.EOL}\treturn processApiResult(ctx as unknown as Context, result, res, next);`
+						body: `(req: FastifyRequest<Body: #{body}, Params: #{path}, Querystring: #{query}, Headers: #{header}, Reply: #{reply}>, rsp: FastifyReply) => {
+						\tconst ctx = {request: req, response: rsp};
+						\tconst result = #{result};
+						\treturn processApiResult(result, res, next);
+						}`,
+						cast: undefined as unknown as string
 					}
 				},
 				support: {
@@ -268,7 +300,9 @@ export const TsMorphCodeGenConfig = {
 					// Path should be relative to 'srcDirName'
 					files: [
 						`index.ts`,
-						`http-response.ts`
+						`http-response.ts`,
+						// This file is to complex to generate the code; Copy an appropriate framework template.
+						{'result-processor.ts': `#{framework}_result-processor.ts`}
 					]
 				},
 				dependencyInjection: 'async-injection' as unknown as ('async-injection'),

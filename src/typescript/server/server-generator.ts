@@ -3,7 +3,7 @@ import {template as lodashTemplate} from 'lodash';
 import {writeFileSync} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {ClassDeclaration, ImportDeclarationStructure, InterfaceDeclaration, JSDocStructure, MethodDeclaration, MethodDeclarationStructure, MethodSignature, MethodSignatureStructure, ObjectLiteralExpression, Project, Scope, SourceFile, StructureKind, SyntaxKind, VariableDeclaration, VariableDeclarationKind, VariableStatement} from 'ts-morph';
+import {ClassDeclaration, InterfaceDeclaration, JSDocStructure, MethodDeclaration, MethodDeclarationStructure, MethodSignature, MethodSignatureStructure, ObjectLiteralExpression, Project, Scope, SourceFile, StructureKind, SyntaxKind, VariableDeclarationKind} from 'ts-morph';
 import {ApiTag} from '../../lang-neutral/api-tag';
 import {MethodOperation} from '../../lang-neutral/method-operation';
 import {TypeSchema} from '../../lang-neutral/type-schema';
@@ -13,22 +13,10 @@ import {bindAst} from '../../ts-morph/ts-morph-ext';
 
 export class TsServerGenerator extends TsMorphBase {
 	protected config = codeGenConfig.generators.tsmorph.server;
-	protected confCtx: {
-		imphorts: ImportDeclarationStructure[],
-		type: string;
-		generic: string;
-		lookup: Record<string, string>,
-		hndlsType: string;
-	};
-	protected hndlTmpls: {
-		imphorts: ImportDeclarationStructure[],
-		hndlParams: Record<string, string>,
-		hndlBody: string
-	};
+	protected framework: typeof codeGenConfig.generators.tsmorph.server['openapi-backend'];
 
 	generate(doc: Project): Project {
-		this.confCtx = codeGenConfig.generators.tsmorph.server.context[codeGenConfig.generators.tsmorph.server.framework];
-		this.hndlTmpls = codeGenConfig.generators.tsmorph.server.hndlTmpls[codeGenConfig.generators.tsmorph.server.webserver];
+		this.framework = codeGenConfig.generators.tsmorph.server[codeGenConfig.generators.tsmorph.server.framework];
 		const apiIntfFiles: SourceFile[] = [];
 		const modelIntfFiles: SourceFile[] = [];
 		const apiHndlFiles: SourceFile[] = [];
@@ -37,7 +25,7 @@ export class TsServerGenerator extends TsMorphBase {
 			intf: ClassDeclaration,
 			impl: ClassDeclaration
 		}>();
-		const di = this.config.di[this.config.dependencyInjection];
+		const di = this.config.dependencyInjection ? this.config.di[this.config.dependencyInjection] : undefined;
 		doc.getSourceFiles().forEach(v => {
 			v.getInterfaces().forEach(i => {
 				if (i.getMethods().length === 0) {
@@ -53,8 +41,10 @@ export class TsServerGenerator extends TsMorphBase {
 					if (methods.length > 0) {
 						const api = c.$ast as ApiTag;
 						const intfName = api.getIdentifier('intf');
+						const intfDir = path.relative(path.join(codeGenConfig.outputDirectory, codeGenConfig.apiImplDir), path.join(codeGenConfig.outputDirectory, codeGenConfig.apiIntfDir));
+						const intDir = path.relative(intfDir, this.config.support.dstDirName);
 						c.getSourceFile().addImportDeclaration({
-							moduleSpecifier: this.config.support.dstDirName,
+							moduleSpecifier: intDir,
 							namedImports: ['HttpResponse']
 						});
 						c.addConstructor({
@@ -66,11 +56,12 @@ export class TsServerGenerator extends TsMorphBase {
 						// We need to change implements to extends, because we are going to change the interface to an abstract class.
 						c.getImplements().forEach(i => c.removeImplements(i));
 						c.setExtends(intfName);
-						c.getExtends().addTypeArgument(this.confCtx.type);
-						v.addImportDeclaration({
-							moduleSpecifier: this.config.framework,
-							namedImports: [this.confCtx.type]
-						});
+						c.getExtends().addTypeArgument(this.framework.context.type);
+						this.framework.context.imphorts.map(i => {return {
+							moduleSpecifier: interpolateBashStyle(i.moduleSpecifier, {internal: intDir}),
+							namedImports: i.namedImports
+						}}).forEach(i => v.addImportDeclaration(i))
+
 						if (di) {
 							diSetupApis.set(api, {intf: undefined, impl: c});
 							di.apiConstruction.implDecorator.forEach(d => {
@@ -176,21 +167,22 @@ export class TsServerGenerator extends TsMorphBase {
 			isExported: true,
 			parameters: [{
 				name: 'api',
-				type: intf.getName() + `<${this.confCtx.type}>`,
+				type: intf.getName() + `<${this.framework.context.type}>`,
 			}]
 		});
-		fn.setBodyText(`return {} as unknown as ${this.confCtx.hndlsType}`);
+		const cast = this.framework.hndl.cast ? ` as unknown as ${this.framework.hndl.cast}` : '';
+		fn.setBodyText(`return {}${cast}`);
 		const retStat = fn.getStatements()[0].asKind(SyntaxKind.ReturnStatement);
 		const retExp = retStat.getExpression().asKind(SyntaxKind.AsExpression);
 		const objLit = retExp.getExpression().asKind(SyntaxKind.AsExpression).getExpression().asKind(SyntaxKind.ObjectLiteralExpression);
 
 		importIfNotSameFile(fn, intf, intf.getName());
-		sf.addImportDeclaration({
-			moduleSpecifier: this.config.support.dstDirName,
-			namedImports: ['processApiResult']
-		});
-		this.confCtx.imphorts?.forEach(i => sf.addImportDeclaration(i));
-		this.hndlTmpls.imphorts?.forEach(i => sf.addImportDeclaration(i));
+		const intfDir = path.relative(path.join(codeGenConfig.outputDirectory, codeGenConfig.apiHndlDir), path.join(codeGenConfig.outputDirectory, codeGenConfig.apiIntfDir));
+		const intDir = path.relative(intfDir, this.config.support.dstDirName);
+		this.framework.hndl.imphorts.map(i => {return {
+			moduleSpecifier: interpolateBashStyle(i.moduleSpecifier, {internal: intDir}),
+			namedImports: i.namedImports
+		}}).forEach(i => sf.addImportDeclaration(i));
 
 		return objLit;
 	}
@@ -202,21 +194,23 @@ export class TsServerGenerator extends TsMorphBase {
 		const internalDir = path.normalize(path.join(codeGenConfig.outputDirectory, globalThis.codeGenConfig.apiIntfDir, this.config.support.dstDirName));
 		mkdirSync(internalDir, {recursive: true});
 		this.config.support.files.forEach(fp => {
+			let dstBase: string;
+			if (typeof fp === 'object') {
+				const key = Object.keys(fp)[0];
+				fp = interpolateBashStyle(fp[key], {framework: this.config.framework});
+				dstBase = path.basename(key);
+			}
+			else {
+				fp = interpolateBashStyle(fp, {framework: this.config.framework});
+				dstBase = path.basename(fp);
+			}
 			srcFilePath = path.normalize(path.join(this.config.support.srcDirName, fp));
-			dstPath = path.join(internalDir, path.basename(srcFilePath));
+			dstPath = path.join(internalDir, dstBase);
 			if (!safeLStatSync(dstPath)) {
 				srcTxt = readFileSync(srcFilePath, 'utf-8');
 				writeFileSync(dstPath, srcTxt);
 			}
 		});
-		// This file is to complex to try to hand generate the code.
-		// Copy an appropriate framework template.
-		srcFilePath = path.normalize(path.join(this.config.support.srcDirName, `${this.config.framework}_${this.config.webserver}_abs-handler.ts`));
-		dstPath = path.join(internalDir, 'abs-handler.ts');
-		if (!safeLStatSync(dstPath)) {
-			srcTxt = readFileSync(srcFilePath, 'utf-8');
-			writeFileSync(dstPath, srcTxt);
-		}
 	}
 
 	protected enhanceInterfaceMethod(intf: MethodSignature) {
@@ -253,65 +247,55 @@ export class TsServerGenerator extends TsMorphBase {
 			returnType: `Promise<HttpResponse<${struct.returnType}>>`
 		});
 		implMethod.setHasOverrideKeyword(true);
-		implMethod.setIsAsync(this.config.stubReturn.trim() !== 'null');
+		implMethod.setIsAsync(this.framework.stubReturn.trim() !== 'null');
 		bindAst(implMethod, method);
 		bindAst(implMethod.getReturnTypeNode(), methodReturnType);
-		this.addCtxParamToMethod(implMethod, this.confCtx.type);
-		implMethod.setBodyText(`return ${this.config.stubReturn};`);
+		this.addCtxParamToMethod(implMethod, this.framework.context.type);
+		implMethod.setBodyText(`return ${this.framework.stubReturn};`);
 		return implMethod;
 	}
 
 	protected createAdapterMethod(adapter: ObjectLiteralExpression, intf: MethodSignature, models: Record<string, InterfaceDeclaration>) {
 		const method = intf.$ast;
-		const operationId = adapter.addPropertyAssignment({
-			name: intf.getName(),
-			initializer: `() => {${this.hndlTmpls.hndlBody}}`,
-		});
-		bindAst(operationId, method);
-		const arrowFn = operationId.getInitializer().asKind(SyntaxKind.ArrowFunction);
-		bindAst(arrowFn, method);
-		const ctxParam = arrowFn.addParameter({
-			name: 'ctx',
-			type: this.confCtx.type
-		});
-		Object.keys(this.hndlTmpls.hndlParams).forEach(key => {
-			arrowFn.addParameter({
-				name: key,
-				type: this.hndlTmpls.hndlParams[key]
-			});
-		});
-		const resultDecl = (arrowFn.getStatements().filter(s => s.getKind() === SyntaxKind.VariableStatement).map((s: VariableStatement) => s.getDeclarations().find(d => d.getName() === 'result')))?.[0] as VariableDeclaration;
-		const resolver = this.confCtx.lookup;
-		const genericParams = {body: '{}', path: [], query: [], header: [], cookie: []};
-		const callStr = intf.getParameters().reduce((s, p, idx) => {
+		const resolver = this.framework.hndl.lookup;
+		const genericParams = {body: 'never', path: [], query: [], header: [], cookie: [], apiInvocation: undefined};
+		genericParams.apiInvocation = intf.getParameters().reduce((s, p, idx) => {
 			let ref: string;
 			const oap = method.parameters[idx];
 			const typeNode = p.getTypeNode();
 			const typeStr = p.getStructure().type as string;
 			if (oap.nodeKind === 'request') {
-				// oaType = (oap as ParameterRequestBody).types.values()
 				ref = resolver.body;
 				genericParams.body = typeStr;
 			}
 			else if (resolver[oap.oae.in]) {
-				// oaType = (oap as ParameterParameter).type.oaType;
 				ref = resolver[oap.oae.in] + `.${oap.name}`;
 				genericParams[oap.oae.in].push(`${oap.name}:${typeStr}`);
 			}
 			if (ref) {
 				if (typeNode?.getKind() === SyntaxKind.TypeReference)
 					if (models[typeStr])
-						importIfNotSameFile(arrowFn, models[typeStr], typeStr);
+						importIfNotSameFile(adapter, models[typeStr], typeStr);
 				s += ', ' + ref;
 			}
 			return s;
-		}, `api.${intf.getName()}(ctx as unknown as Context`) + ')';
-		resultDecl.setInitializer(callStr);
+		}, `api.${intf.getName()}(ctx as unknown as ${this.framework.context.type}`) + ')';
 		Object.keys(genericParams).forEach(key => {
-			if (Array.isArray(genericParams[key]))
-				genericParams[key] = `{${genericParams[key].join(',')}}`;
+			if (Array.isArray(genericParams[key])) {
+				if (genericParams[key].length === 0)
+					genericParams[key] = 'never';
+				else
+					genericParams[key] = `{${genericParams[key].join(',')}}`;
+			}
 		});
-		ctxParam.setType(interpolateBashStyle(this.confCtx.generic, genericParams));
+
+		const operationId = adapter.addPropertyAssignment({
+			name: intf.getName(),
+			initializer: interpolateBashStyle(this.framework.hndl.body, genericParams)
+		});
+		bindAst(operationId, method);
+		const arrowFn = operationId.getInitializer().asKind(SyntaxKind.ArrowFunction);
+		bindAst(arrowFn, method);
 	}
 
 	protected interfaceToAbsClass(i: InterfaceDeclaration) {

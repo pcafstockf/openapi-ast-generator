@@ -1,2 +1,2 @@
-export * from './abs-handler';
+export * from './result-processor';
 export * from './http-response';

@@ -16,8 +16,13 @@ They expose methods to operate on data, but how they store that data is up to th
 To simplify, we will refer to these Ast interfaces as the "`CodeGenAst`"
 
 ## Configuration / Customization
-The code produced by openapi-ast-generator is highly customizable and configuration driven
-(explained in greater detail below).
+The code produced by openapi-ast-generator is both highly customizable **and** opinionated.  
+Customizable in the sense of being configuration driven (explained in greater detail below), 
+but opinionated in the following ways:
+* Whenever pragmatically possible, callers and implementors of an API should be oblivious to transport details.
+* Client and server generated code should perform intelligent optimizations if the specification allows.
+* The ability to easily unit test, mock, and perform integration testing of APIs is critical.
+* Supporting the previous bullet, Dependency Injection (while not required), is treated as a first class citizen.
 
 ## Transformation
 

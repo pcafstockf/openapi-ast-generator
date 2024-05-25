@@ -17,7 +17,7 @@ export class TsClientGenerator extends TsMorphBase {
 	generate(doc: Project): Project {
 		const apiIntfFiles: SourceFile[] = [];
 		const modelIntfFiles: SourceFile[] = [];
-		const di = this.config.di[this.config.dependencyInjection];
+		const di = this.config.dependencyInjection ? this.config.di[this.config.dependencyInjection] : undefined;
 		const diSetupApis = new Map<ApiTag, {
 			intf: InterfaceDeclaration,
 			impl: ClassDeclaration
@@ -148,9 +148,18 @@ export class TsClientGenerator extends TsMorphBase {
 		const internalDir = path.normalize(path.join(codeGenConfig.outputDirectory, globalThis.codeGenConfig.apiIntfDir, this.config.support.dstDirName));
 		mkdirSync(internalDir, {recursive: true});
 		this.config.support.files.forEach(fp => {
-			fp = interpolateBashStyle(fp, {lib: this.config.httplib ?? 'fetch'})
+			let dstBase: string;
+			if (typeof fp === 'object') {
+				const key = Object.keys(fp)[0];
+				fp = interpolateBashStyle(fp[key], {lib: this.config.httplib ?? 'fetch'})
+				dstBase = path.basename(key);
+			}
+			else {
+				fp = interpolateBashStyle(fp, {lib: this.config.httplib ?? 'fetch'});
+				dstBase = path.basename(fp);
+			}
 			const srcFilePath = path.normalize(path.join(this.config.support.srcDirName, fp));
-			dstPath = path.join(internalDir, path.basename(srcFilePath));
+			dstPath = path.join(internalDir, dstBase);
 			if (!safeLStatSync(dstPath)) {
 				srcTxt = readFileSync(srcFilePath, 'utf-8');
 				writeFileSync(dstPath, srcTxt);
@@ -180,8 +189,8 @@ export class TsClientGenerator extends TsMorphBase {
 				{name: 'configuration', type: 'ApiClientConfig', hasQuestionToken: true, scope: Scope.Protected}
 			]
 		});
-		const di = this.config.di[this.config.dependencyInjection];
-		if (di.apiConstruction) {
+		const di = this.config.dependencyInjection ? this.config.di[this.config.dependencyInjection] : undefined;
+		if (di?.apiConstruction) {
 			const api = c.$ast as ApiTag;
 			const params = impl.getParameters();
 			di.apiConstruction.httpClientInject?.forEach((d => {
