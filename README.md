@@ -59,14 +59,23 @@ This is a highly configurable tool because most developers have strong feelings 
 Personally, I feel that if generated code performs the simple task assign to it, I don't really care what it looks like, or even if I have to jump through some hoops to fit it into my project. It's works and I did not have to spend time on it.  
 However opinions vary, so defaults are provided for everything, but at the same time you can override / customize to your hearts content.
 
+## Generator Targets / Options
+* Client TypeScript is generic and supports using axios, fetch, node, and Angular http(s) libraries.
+* Server TypeScript supports 3 popular OpenApi backends.  
+  * [openapi-backend](https://www.npmjs.com/package/openapi-backend)
+  * [fastify-openapi-glue](https://www.npmjs.com/package/fastify-openapi-glue)
+  * [express-openapi-validator](https://www.npmjs.com/package/express-openapi-validator)
+* [async-injection](https://www.npmjs.com/package/async-injection) is enabled by default for all targets except Angluar client (which used Angular DI).
+
 ## Notice
 This project is early stage (version < 1.0) and the code is still pretty raw.  
 The whole idea of transforming OpenAPI to a `CodeGenAst`, and then into ts-morph is (to my knowledge) new, and I am feeling my way through this.  
-In other words, rather than a cohesive smooth flow, you can see how my understanding evolved over the course of the project.  
+In other words, rather than a cohesive smooth design, you can see how my understanding evolved over the course of the project.  
 For example, ts-morph understandably destroys all of its own AST nodes (and rebuilds them) when a source file is reformatted.
 This of course plays havoc with the binding that I inject into some ts-morph nodes so that they can trace their way back to the `CodeGenAst` that created them.
-So, I had to create a GOF Memento pattern to capture these bindings just before ts-morph reformats and then restore the bindings afterward.
-The point is lots of this was developed with a hack and try mentality.
+So, I had to create a GOF Memento pattern to capture these bindings just before ts-morph reformats and then restore the bindings afterward.  
+The point is lots of this was developed with a hack and try mentality.  
+However, before the project gets tagged as 1.0, all that will be refactored, cleaned up, better tested, and documented.
 
 With that said, it produces a PetStore client (axios or node http based) and server (openapi-backend based) that both work and I like the way it looks / works.  
 So, I decided to publish this initial effort and see where it goes.
@@ -78,13 +87,14 @@ Please factor that into your decisions, because I'm not committing to anything o
 Contributions and suggestions welcome!
 
 ## Next Steps
-I am a big fan of `Angular` and of `openapi-backend`.  
-Generating an Angular based client is first on my list.  
-After that I will likely develop a Fastify server based on `fastify-openapi-glue` (and / or maybe just plain `Fastify`).
-If I do implement the native Fastify approach, the OpenApi spec used for input will need to be >= v3.1, so I can use Json Schema.  
-`express-openapi-validator` seems pretty popular, so that might be something I pursue.  
-Webpacking this project to a single file standalone cli tool is also high on my list.  
-Lets see how all that goes, and perhaps a version 2 will support a Java Jakarta EE server and a C++ client.
+* There are a few todos WRT how the client decides to submit data.
+* Thinking about splitting into two tools.
+  * First would bundle / optimize the document, and ouput languager-neutral `CodeGenAst` (as json).
+  * Second would take output of the first and produce TypeScript client / server.
+  * This would **perhaps** make Java and C++ generators easier to build.
+* I may take a little time to look at fast-json and fast-json-stringify in the client.
+* Webpacking this project to a single file standalone cli tool (or two) is high on my list.  
+* Once 1.0 is released, perhaps a version 2 will support a Java Jakarta EE server and a C++ client.
 
 ## Warning
 Currently I have tsconfig setup such that all top level files are covered.  
