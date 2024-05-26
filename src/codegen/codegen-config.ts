@@ -224,7 +224,7 @@ export const TsMorphCodeGenConfig = {
 			},
 			server: {
 				// The framework should actually be the npm package name.
-				framework: 'openapi-backend' as ('openapi-backend' | 'express-openapi-validator' | 'fastify-openapi-glue' | 'fastify-native'),
+				framework: 'openapi-backend' as ('openapi-backend' | 'express-openapi-validator' | 'fastify-openapi-glue'),
 				'openapi-backend': {
 					stubReturn: 'null',
 					context: {
@@ -247,10 +247,10 @@ export const TsMorphCodeGenConfig = {
 						}],
 						lookup: {
 							body: 'ctx.request.requestBody',
-							query: 'ctx.request.query',
-							path: 'ctx.request.params',
-							header: 'ctx.request.headers',
-							cookie: 'ctx.request.cookies'
+							query: 'ctx.request.query.#{name}',
+							path: 'ctx.request.params.#{name}',
+							header: 'ctx.request.headers.#{name}',
+							cookie: `ctx.request.cookies['#{name}']`
 						},
 						body: `(ctx: Context<#{body}, #{path}, #{query}, #{header}, #{cookie}>, _: Request, res: Response, next: NextFunction) => {
 						\tconst result = #{apiInvocation};
@@ -278,10 +278,10 @@ export const TsMorphCodeGenConfig = {
 						}],
 						lookup: {
 							body: 'req.body',
-							query: 'req.query',
-							path: 'req.params',
-							header: 'req.headers',
-							cookie: '(req.cookies as {[key: string]: string})'   // This presumes the presence of @fastify/cookie
+							query: 'req.query.#{name}',
+							path: 'req.params.#{name}',
+							header: 'req.headers.#{name}',
+							cookie: `req.cookies['#{name}']`   // This presumes the presence of @fastify/cookie
 						},
 						body: `(req: FastifyRequest<{Body: #{body}, Params: #{path}, Querystring: #{query}, Headers: #{header}, Reply: #{reply}}>, rsp: FastifyReply) => {
 						\tconst ctx = {request: req, response: rsp};
@@ -289,6 +289,39 @@ export const TsMorphCodeGenConfig = {
 						\treturn processApiResult(req, result, rsp);
 						}`,
 						cast: undefined as unknown as string
+					}
+				},
+				'express-openapi-validator': {
+					stubReturn: 'null',
+					context: {
+						type: 'Context',
+						imphorts: [{
+							moduleSpecifier: '#{internal}',
+							namedImports: ['Context']
+						}],
+					},
+					hndl: {
+						imphorts: [{
+							moduleSpecifier: 'express',
+							namedImports: ['Request', 'Response', 'NextFunction', 'RequestHandler']
+						},{
+							moduleSpecifier: '#{internal}',
+							namedImports: ['Context', 'processApiResult']
+						}],
+						lookup: {
+							body: 'req.body',
+							query: 'req.query.#{name}',
+							path: 'req.params.#{name}',
+							header: `req.headers['#{name}'] as string`,
+							cookie: `req.cookies['#{name}']`
+						},
+						operationId: '"$#{pattern}!#{method}"',
+						body: `(req: Request<#{path}, #{reply}, #{body}, #{query}>, res: Response<#{reply}>, next: NextFunction) => {
+						\tconst ctx = {request: req, response: res};
+						\tconst result = #{apiInvocation};
+						\treturn processApiResult(req as unknown as Request, result, res as unknown as Response, next);
+						}`,
+						cast: 'Record<string, RequestHandler>'
 					}
 				},
 				support: {

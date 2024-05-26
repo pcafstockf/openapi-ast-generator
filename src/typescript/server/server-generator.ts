@@ -4,6 +4,7 @@ import {writeFileSync} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {ClassDeclaration, InterfaceDeclaration, JSDocStructure, MethodDeclaration, MethodDeclarationStructure, MethodSignature, MethodSignatureStructure, ObjectLiteralExpression, Project, Scope, SourceFile, StructureKind, SyntaxKind, VariableDeclarationKind} from 'ts-morph';
+import {kebabCase} from '../../codegen/name-utils';
 import {ApiTag} from '../../lang-neutral/api-tag';
 import {MethodOperation} from '../../lang-neutral/method-operation';
 import {TypeSchema} from '../../lang-neutral/type-schema';
@@ -273,7 +274,7 @@ export class TsServerGenerator extends TsMorphBase {
 	protected createAdapterMethod(adapter: ObjectLiteralExpression, intf: MethodSignature, models: Record<string, InterfaceDeclaration>) {
 		const method = intf.$ast;
 		const resolver = this.framework.hndl.lookup;
-		const genericParams = {body: 'never', path: [], query: [], header: [], cookie: [], reply: 'never', apiInvocation: undefined};
+		const genericParams = {body: 'never', path: [], query: [], header: [], cookie: [], reply: 'never', oaVers: method.document.openapi, apiInvocation: undefined};
 		genericParams.apiInvocation = intf.getParameters().reduce((s, p, idx) => {
 			let ref: string;
 			const oap = method.parameters[idx];
@@ -284,7 +285,7 @@ export class TsServerGenerator extends TsMorphBase {
 				genericParams.body = typeStr;
 			}
 			else if (resolver[oap.oae.in]) {
-				ref = resolver[oap.oae.in] + `.${oap.name}`;
+				ref = interpolateBashStyle(resolver[oap.oae.in], {name: oap.name});
 				genericParams[oap.oae.in].push(`${oap.name}:${typeStr}`);
 			}
 			if (ref) {
@@ -311,8 +312,10 @@ export class TsServerGenerator extends TsMorphBase {
 			genericParams.reply = rtTxt;
 
 		const initTxt = interpolateBashStyle(this.framework.hndl.body, genericParams);
+		const opNameData = {name: intf.getName(), pattern: method.pattern.toLowerCase(), method: method.httpMethod.toUpperCase(), operationId: method.oae.operationId};
+		const operationIdName = interpolateBashStyle(this.framework.hndl.operationId ?? intf.getName(), opNameData);
 		const operationId = adapter.addPropertyAssignment({
-			name: intf.getName(),
+			name: operationIdName,
 			initializer: initTxt
 		});
 		bindAst(operationId, method);

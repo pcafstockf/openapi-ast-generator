@@ -1,13 +1,14 @@
-import {FastifyReply, FastifyRequest} from 'fastify';
-import {mock} from 'mock-json-schema';
+import {NextFunction, Request, Response} from 'express';
+import mock_json_schema_1, {mock} from 'mock-json-schema';
 import {HttpResponse} from './http-response';
 
 /**
  * Every Api/Service method receives this as its first parameter.
  */
 export interface Context {
-	request: FastifyRequest;
-	response: FastifyReply
+	openapiVersion: string;
+	request: Request;
+	response: Response
 }
 
 /**
@@ -47,8 +48,32 @@ function findDefaultStatusCodeMatch(obj: object) {
 }
 
 /**
+ * Copied and abbreviated from openapi-backend.
+ */
+function exampleOrMock(content: object) {
+	// resolve media type
+	const mediaType = 'application/json';
+	const mediaResponse = content[mediaType] || content[Object.keys(content)[0]];
+	if (!mediaResponse)
+		return undefined;
+	const { examples, schema } = mediaResponse;
+	// if operation has an example, return its value
+	if (mediaResponse.example)
+		return mediaResponse.example;
+	// pick the first example from examples
+	if (examples) {
+		const exampleObject = examples[Object.keys(examples)[0]];
+		return exampleObject.value;
+	}
+	// mock using json schema
+	if (schema)
+		return mock(schema);
+	return undefined;
+}
+
+/**
  * Handlers call an appropriate Api/Service method, and this method processes those responses. <br/>
- * Every Api/Service method is passed a 'ctx' object of type {request: FastifyRequest; response: FastifyReply} (aka @see Context).
+ * Every Api/Service method is passed a 'ctx' object of type {request: Request; response: Response} (aka @see Context).
  * <br/>
  * Every Api/Service method should:<ul>
  *  <li>Return Promise<{@link HttpResponse}> to send back the response.
@@ -58,12 +83,14 @@ function findDefaultStatusCodeMatch(obj: object) {
  *  <li>Throw null | undefined to indicate the 'next' handler in the chain should be called with no args.
  * </ul>
  */
-export function processApiResult<T>(req: FastifyRequest, result: Promise<HttpResponse<T>> | null, res: FastifyReply) {
+export function processApiResult<T>(req: Request, result: Promise<HttpResponse<T>> | null, res: Response, next: NextFunction) {
 	if (typeof result === 'object' && (result instanceof Promise || typeof (result as any)?.then === 'function')) {
-		return result.then(r => {
+		result.then(r => {
 			if (r) {
 				if (r.headers && typeof r.headers === 'object')
-					res.headers(r.headers);
+					Object.keys(r.headers).forEach(name => {
+						res.setHeader(name, r.headers[name]);
+					});
 				res.status(r.status ?? 200);
 				if (typeof r.data === 'undefined')
 					return res.send();
@@ -71,21 +98,23 @@ export function processApiResult<T>(req: FastifyRequest, result: Promise<HttpRes
 					return res.send(r.data);
 			}
 			// else, remember that undefined means its been handled and we should do nothing.
+		}).catch(err => {
+			if (!err)
+				next();
+			else
+				next(err);
 		});
 	}
 	else {
 		let rspStatus = 501;
 		let rspData = undefined;
-		if (req.routeOptions.schema.response) {
-			const {status, rspSchema} = findDefaultStatusCodeMatch(req.routeOptions.schema.response as object);
+		if ((req as any)?.openapi?.schema?.responses) {
+			const {status, rspSchema} = findDefaultStatusCodeMatch((req as any).openapi.schema.responses as object);
 			if (typeof status === 'number')
 				rspStatus = status;
 			if (rspSchema)
-				rspData = mock(rspSchema);
+				rspData = exampleOrMock(rspSchema.content);
 		}
-		res.status(rspStatus);
-		if (rspData)
-			return res.send(rspData);
-		return res.send();
+		return res.status(rspStatus).send(rspData as T);
 	}
 }
