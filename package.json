@@ -1,6 +1,6 @@
 {
 	"name": "openapi-ast-generator",
-	"version": "0.0.2",
+	"version": "0.0.3",
 	"description": "Transform OpenAPI (v3x) Document into language specific AST for code generation",
 	"author": "Frank Stock",
 	"license": "MIT",
