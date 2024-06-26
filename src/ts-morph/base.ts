@@ -1,6 +1,7 @@
 import path from 'node:path';
 import {FormatCodeSettings, MethodDeclaration, Node, SourceFile, VariableStatement} from 'ts-morph';
 import {bindAst} from './ts-morph-ext';
+import {ParameterParameter} from "../lang-neutral/parameter-parameter";
 
 export const SourceCodeFormat: FormatCodeSettings = {
 	tabSize: 4,
@@ -101,8 +102,8 @@ export class TsMorphBase {
 				const meth = {$ast: m.$ast};
 				if (retType)
 					meth['$type'] = retType.$ast;
-				m.getParameters().forEach(p => {
-					meth[p.getName()] = {$ast: p.$ast, $type: p.getTypeNode().$ast};
+				m.getParameters().forEach((p, i) => {
+					meth[p.getName()] = {$ast: p.$ast, $type: p.getTypeNode()?.$ast ?? (p.$ast as ParameterParameter)?.type};
 				});
 				intf[m.getName()] = meth;
 			});

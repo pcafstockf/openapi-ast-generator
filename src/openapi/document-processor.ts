@@ -1,8 +1,11 @@
 import SwaggerParser from '@apidevtools/swagger-parser';
 import {map as asyncMap} from 'async';
+import * as fs from 'fs';
 import {mergeWith as lodashMergeWith, set as lodashSet, union as lodashUnion} from 'lodash';
 import {OpenAPI} from 'openapi-types';
+import {parse as json5Parse} from 'json5';
 import {TargetOpenAPI} from '../openapi-supported-versions';
+import {safeLStatSync} from '../shared';
 import {hoistNamedObjectSchemas, initResolver, resolveTopLevelAliases, uplevelPaths} from './openapi-utils';
 
 export class OpenApiInputProcessor {
@@ -11,25 +14,49 @@ export class OpenApiInputProcessor {
 
 	async optimize(location: string | string[], strict?: boolean, elevate?: boolean, envVars?: string[]): Promise<TargetOpenAPI.Document> {
 		let doc: TargetOpenAPI.Document;
+		let enforceStrict = strict;
 		const parser = new SwaggerParser();
 		if (Array.isArray(location)) {
 			const docs = await asyncMap(location, async (loc) => {
-				let p = new SwaggerParser();
-				if (strict)
-					await p.validate(loc);
-				return p.parse(loc);
+				try {
+					const p = new SwaggerParser();
+					if (strict)
+						await p.validate(loc);
+					const doc = await p.parse(loc);
+					return doc;
+				}
+				catch(e:any) {
+					if (e instanceof SyntaxError && safeLStatSync(loc)) {
+						const content = await fs.promises.readFile(loc);
+						doc = json5Parse(content.toString('utf8'));
+						if (Object.keys(doc).length > 0) {
+							enforceStrict = true;  // It wasn't valid, but we need to make sure
+							return doc;
+						}
+					}
+					throw e;
+				}
 			});
 
-			function arrayMerger(objValue, srcValue) {
-				if (Array.isArray(objValue) && Array.isArray(srcValue))
-					return lodashUnion(objValue, srcValue);
-			}
-
+			// Use the merging algorithm from dyflex-config to support union and replacement merging.
+			const deletes: (() => void)[] = [];
 			const obj = docs.slice(1).reduce((p, v) => {
-				return lodashMergeWith(p, v, arrayMerger);
+				return lodashMergeWith(p, v, (objValue, srcValue, key, object) => {
+					if (key?.startsWith('!')) {
+						deletes.push(() => {
+							delete object[key];
+						});
+						object[key.substring(1)] = srcValue;
+					}
+					else if (Array.isArray(objValue))
+						return lodashUnion(objValue, srcValue);
+					return undefined;
+				});
 			}, docs[0] as OpenAPI.Document);
+			deletes.forEach(d => d());
+
 			// Just be sure we ended up with a valid doc!
-			if (strict)
+			if (enforceStrict)
 				await parser.validate(obj);
 			doc = (await parser.bundle(obj)) as TargetOpenAPI.Document;
 		}

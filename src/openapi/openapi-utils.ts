@@ -86,6 +86,8 @@ export function resolveTopLevelAliases(doc: TargetOpenAPI.Document) {
 	Object.keys(components.schemas).forEach(componentKey => {
 		const s = components.schemas[componentKey];
 		components.schemas[componentKey] = resolveIfRef(s).obj;
+		if (! (components.schemas[componentKey] as TargetOpenAPI.SchemaObject).title)
+			(components.schemas[componentKey] as TargetOpenAPI.SchemaObject).title = componentKey;
 	});
 }
 

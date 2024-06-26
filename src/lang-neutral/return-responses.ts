@@ -33,17 +33,23 @@ export class ReturnResponses implements LangNeutral {
 		this.location = json.location;
 		this.preferredResponses = json.preferredResponses;
 		this.preferredResponses.map(r => r.code).forEach(rspCode => {
-			const rsp = resolveIfRef<TargetOpenAPI.ResponseObject>(this.oae[rspCode]).obj;
+			const r = resolveIfRef<TargetOpenAPI.ResponseObject>(this.oae[rspCode]);
+			const rsp = r.obj;
 			if (rsp?.content) {
 				Object.keys(rsp.content).forEach((mediaType) => {
-					resolveMediaTypeTypes(typeResolver, rsp.content[mediaType], this.location.concat(rspCode, 'content', mediaType));
+					let loc = this.location.concat(rspCode);
+					if (r.ref)
+						loc = (r.ref.startsWith('#') ? r.ref.substring(1) : r.ref).split('/').filter(s => !!s);
+					resolveMediaTypeTypes(typeResolver, rsp.content[mediaType], loc.concat('content', mediaType));
 				});
 			}
 			if (rsp?.headers) {
 				Object.keys(rsp.headers).forEach(hdrKey => {
 					const hdr = resolveIfRef<TargetOpenAPI.HeaderObject>(rsp.headers[hdrKey]);
 					if (hdr.obj) {
-						const hdrLocation = this.location.concat(rspCode, 'headers', hdrKey);
+						let hdrLocation = this.location.concat(rspCode, 'headers', hdrKey);
+						if (hdr.ref)
+							hdrLocation = (hdr.ref.startsWith('#') ? hdr.ref.substring(1) : hdr.ref).split('/').filter(s => !!s);
 						if (hdr.obj.schema)
 							typeResolver(hdr.obj.schema, hdrLocation.concat('schema'));
 						if (hdr.obj.content) {

@@ -76,10 +76,10 @@ export class LanguageNeutralGenerator extends LanguageNeutralBase {
 	protected iteratePathItem(pattern: string, pathItem: TargetOpenAPI.PathItemObject, location: string[]) {
 		Object.keys(pathItem).filter(n => HttpMethodNames.indexOf(n.toLowerCase()) >= 0).forEach((httpMethod) => {
 			const operation = pathItem[httpMethod] as TargetOpenAPI.OperationObject;
+			if (operation['x-ignore'])
+				return;
 			if (!operation.operationId)
 				operation.operationId = nameUtils.setCase(httpMethod + ' ' + pattern, 'snake');
-			if (globalThis.codeGenConfig.omittedOperationIds.indexOf(operation.operationId) >= 0)
-				return;
 			let tag: string;
 			if (Array.isArray(operation.tags) && operation.tags.length > 0)
 				tag = operation.tags[0];
@@ -338,16 +338,20 @@ export class LanguageNeutralGenerator extends LanguageNeutralBase {
 		const rspArgs = this.operationResponsesArgs(method.httpMethod, method.location);
 		const VisitParamFn = (p: ParameterMetaData) => {
 			const param = this.makeParameterParameter(p.location);
+			if (param.oae['x-ignore'])
+				return;
 			method.parameters.push(param);
 			this.visitParameterBaseObject(param.oae, p.location);
 		};
 		const VisitReqBodyFn = (b: RequestBodyMetaData) => {
 			const param = this.makeParameterRequestBody(b.location, b.name, b.preferredMediaTypes);
+			if (param.oae['x-ignore'])
+				return;
 			method.parameters.push(param);
-			this.visitParameterBaseObject(param.oae, b.location);
+			this.visitParameterBaseObject(param.oae as TargetOpenAPI.ParameterBaseObject, b.location);
 		};
 
-		// Ensure a stable parameter ordering *and* one that is consitent with language semantics (required before optional, etc.).
+		// Ensure a stable parameter ordering *and* one that is consistent with language semantics (required before optional, etc.).
 		let methodParams = params.slice(0) as AbsMetaData[];
 		if (reqBodyArgs)
 			methodParams.push(reqBodyArgs);

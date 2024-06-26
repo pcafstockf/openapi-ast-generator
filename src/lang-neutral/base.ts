@@ -50,7 +50,7 @@ export class LanguageNeutralBase {
 		if (r?.obj) {
 			if (r.obj.$ast)
 				return r.obj.$ast;
-			if (!this.oaDoc.tags.find(t => t.name === r.obj.name))
+			if (!this.oaDoc.tags?.find(t => t.name === r.obj.name))
 				throw new Error('Invalid tag/api');
 			let location: string[];
 			if (r.ref)

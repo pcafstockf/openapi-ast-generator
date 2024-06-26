@@ -615,13 +615,14 @@ export class TsMorphGenerator extends TsMorphBase {
 		}
 
 		const joinTypesAs = (types: TypeSchema[], typeKind: SyntaxKind) => {
-			// We need to first recursively resolve all the types that are used to compose this one.
-			const tsTypes = types.map(e => this.resolveType(e, mode));
+			// We need to first recursively resolve all the types that are used to compose this one (but we ignore schema that have no type as they are not really schema).
+			const tsTypes = types.filter(e => e.oae.type).map(e => this.resolveType(e, mode));
 			const tsTxts = tsTypes.map(e => this.tsTypeToText(e));
 			let sep = typeKind === SyntaxKind.IntersectionType ? ' & ' : ' | ';
 			if (type.name)
 				return this.typeToNamedAliasType(type, tsTxts.join(sep));
-			return this.typeToInlineType(type, tsTxts.join(sep), typeKind);
+			// Not certain that
+			return this.typeToInlineType(type, tsTxts.join(sep), tsTypes.length > 1 ? typeKind : SyntaxKind.TypeReference);
 		};
 
 		if (type.nodeKind === 'record') {
@@ -752,6 +753,7 @@ export class TsMorphGenerator extends TsMorphBase {
 			case SyntaxKind.TypeLiteral:
 			case SyntaxKind.IntersectionType:
 			case SyntaxKind.UnionType:
+			case SyntaxKind.TypeReference:
 				return tsType.print();
 			case SyntaxKind.TypeAliasDeclaration:
 				return (tsType as TypeAliasDeclaration).getTypeNode().print();

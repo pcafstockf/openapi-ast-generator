@@ -1,5 +1,4 @@
 import {cloneDeep, merge, mergeWith} from 'lodash';
-import os from 'node:os';
 import {IndentationText, NewLineKind, QuoteKind, ScriptTarget} from 'ts-morph';
 import {interpolateBashStyle} from '../shared';
 import {SourceCodeFormat} from '../ts-morph/base';
@@ -59,7 +58,6 @@ export const BaseCodeGenConfig = {
 	role: 'client' as 'client' | 'server',
 	target: 'browser' as 'browser' | 'node' | 'any',
 	emitDescriptions: true,
-	omittedOperationIds: [] as string[],
 	generators: {} as Record<string, any>
 };
 
@@ -280,7 +278,7 @@ export const TsMorphCodeGenConfig = {
 							body: 'req.body',
 							query: 'req.query.#{name}',
 							path: 'req.params.#{name}',
-							header: 'req.headers.#{name}',
+							header: 'req.headers.#{name} as #{type}',
 							cookie: `req.cookies['#{name}']`   // This presumes the presence of @fastify/cookie
 						},
 						body: `(req: FastifyRequest<{Body: #{body}, Params: #{path}, Querystring: #{query}, Headers: #{header}, Reply: #{reply}}>, rsp: FastifyReply) => {

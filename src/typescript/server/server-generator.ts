@@ -4,11 +4,11 @@ import {writeFileSync} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {ClassDeclaration, InterfaceDeclaration, JSDocStructure, MethodDeclaration, MethodDeclarationStructure, MethodSignature, MethodSignatureStructure, ObjectLiteralExpression, Project, Scope, SourceFile, StructureKind, SyntaxKind, VariableDeclarationKind} from 'ts-morph';
-import {kebabCase} from '../../codegen/name-utils';
+import {isValidJsIdentifier} from '../../codegen/name-utils';
 import {ApiTag} from '../../lang-neutral/api-tag';
 import {MethodOperation} from '../../lang-neutral/method-operation';
 import {TypeSchema} from '../../lang-neutral/type-schema';
-import {interpolateBashStyle, omitDeep, safeLStatSync} from '../../shared';
+import {interpolateBashStyle, safeLStatSync} from '../../shared';
 import {importIfNotSameFile, TsMorphBase} from '../../ts-morph/base';
 import {bindAst} from '../../ts-morph/ts-morph-ext';
 
@@ -285,8 +285,14 @@ export class TsServerGenerator extends TsMorphBase {
 				genericParams.body = typeStr;
 			}
 			else if (resolver[oap.oae.in]) {
-				ref = interpolateBashStyle(resolver[oap.oae.in], {name: oap.name});
-				genericParams[oap.oae.in].push(`${oap.name}:${typeStr}`);
+				let jsId = oap.name;
+				ref = interpolateBashStyle(resolver[oap.oae.in], {name: oap.name, type: typeStr});
+				if (! isValidJsIdentifier(jsId)) {
+					if (ref.endsWith('.' + jsId) || ref.indexOf('.' + jsId + ' as ') > 0)
+						ref = ref.replace('.' + jsId, `['${jsId}']`);
+					jsId = `['${jsId}']`;
+				}
+				genericParams[oap.oae.in].push(`${jsId}:${typeStr}`);
 			}
 			if (ref) {
 				if (typeNode?.getKind() === SyntaxKind.TypeReference)

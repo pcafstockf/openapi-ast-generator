@@ -1,5 +1,5 @@
 import {NextFunction, Request, Response} from 'express';
-import mock_json_schema_1, {mock} from 'mock-json-schema';
+import {mock} from 'mock-json-schema';
 import {HttpResponse} from './http-response';
 
 /**

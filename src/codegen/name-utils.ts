@@ -64,3 +64,8 @@ export const setCase = (s: string, c: NameCase) => {
 	}
 	return s;
 };
+
+/**
+ * Returns true or false depending on whether the input is a valid JavaScript identifier.
+ */
+export const isValidJsIdentifier = (s: string) => /^[a-z_$][a-z_$0-9]*$/i.test(s);
