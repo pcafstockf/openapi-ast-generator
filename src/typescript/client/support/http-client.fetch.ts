@@ -34,9 +34,13 @@ class FetchHttpClient implements HttpClient {
 		const options: RequestInit = {
 			method,
 			headers: undefined,
-			credentials: opts?.withCredentials ? 'include' : 'omit',
+			credentials: opts?.credentials ? 'include' : 'omit',
 			body: body
 		};
+		if (typeof opts?.credentials === 'boolean')
+			options.credentials = opts?.credentials ? 'include' : 'omit';
+		else
+			options.credentials = opts?.credentials as RequestCredentials;
 		if (opts.headers)
 			options.headers = Object.keys(opts.headers).reduce((acc, key) => {
 				if (Array.isArray(opts.headers[key]))

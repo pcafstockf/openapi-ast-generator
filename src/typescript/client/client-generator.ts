@@ -3,6 +3,7 @@ import {findLastIndex, template as lodashTemplate} from 'lodash';
 import {writeFileSync} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {stringify as json5Stringify} from 'json5';
 import {ClassDeclaration, InterfaceDeclaration, MethodDeclaration, MethodDeclarationStructure, MethodSignature, Project, Scope, SourceFile, StructureKind, SyntaxKind, VariableDeclarationKind} from 'ts-morph';
 import {ApiTag} from '../../lang-neutral/api-tag';
 import {ParameterParameter} from '../../lang-neutral/parameter-parameter';
@@ -186,7 +187,7 @@ export class TsClientGenerator extends TsMorphBase {
 		const impl = c.addConstructor({
 			parameters: [
 				{name: 'httpClient', type: 'HttpClient', scope: Scope.Protected},
-				{name: 'configuration', type: 'ApiClientConfig', hasQuestionToken: true, scope: Scope.Protected}
+				{name: 'config', type: 'ApiClientConfig', hasQuestionToken: true, scope: Scope.Protected}
 			]
 		});
 		const di = this.config.dependencyInjection ? this.config.di[this.config.dependencyInjection] : undefined;
@@ -206,7 +207,7 @@ export class TsClientGenerator extends TsMorphBase {
 		impl.setBodyText((writer) => {
 			if (c.getExtends())
 				writer.writeLine('super();');
-			writer.writeLine('this.configuration = this.configuration || {}');
+			writer.writeLine('this.config = this.config || {}');
 		});
 	}
 
@@ -360,11 +361,8 @@ export class TsClientGenerator extends TsMorphBase {
 			let pathPattern = m.pattern.replace(/{(.*?)}/g, (_, g) => '${ ' + makeSerializeParameterTxt(m.parameters.find(p => p.nodeKind === 'parameter' && p.name === g) as ParameterParameter) + '}');
 			if (pathPattern[0] !== '/')
 				pathPattern = '/' + pathPattern;
-			writer.writeLine('let $serviceUrl = `${this.configuration.baseURL}' + pathPattern + '`;');
-			writer.writeLine(`const $localHdrs = Object.keys(this.configuration.headers || {}).reduce((p, v) => {`)
-				.writeLine(`p[v.toLowerCase()] = this.configuration.headers[v];`)
-				.writeLine(`return p;`)
-				.writeLine(`}, {});`);
+			writer.writeLine('let $serviceUrl = `${this.config.baseURL}' + pathPattern + '`;');
+			writer.writeLine(`const $localHdrs = {};`);
 			Object.keys(pdHdrs).forEach(key => {
 				writer.write('$localHdrs[').quote(key.toLowerCase()).write('] = ').quote(pdHdrs[key]).write(';');
 			});
@@ -376,48 +374,42 @@ export class TsClientGenerator extends TsMorphBase {
 			});
 			if (!writer.isLastNewLine())
 				writer.newLine();
-			if (m.security?.apiKey && (m.security.apiKey.header || m.security.apiKey.query)) {
-				writer.writeLine('const $apiKeys = typeof this.configuration.authn?.apiKeys === \'function\' ? this.configuration.authn.apiKeys(`${$serviceUrl}`) : this.configuration.authn?.apiKeys');
-				m.security.apiKey.header?.forEach(key => {
-					writer.write('if ($apiKeys?.[').quote(key).write('])').newLine()
-						.write('$localHdrs[').quote(key.toLowerCase()).write('] = $apiKeys[').quote(key).write('];');
-				});
-				m.security.apiKey.query?.forEach(key => {
-					writer.write('if ($apiKeys?.[').quote(key).write('])').newLine()
-						.write('queryParams[').quote(key).write('] = $apiKeys[').quote(key).write('];');
-				});
-			}
-			if (m.security?.httpAuth?.bearer) {
-				writer.writeLine('const $bearerToken = typeof this.configuration.authn?.bearerToken === \'function\' ? this.configuration.authn.bearerToken(`${$serviceUrl}`) : this.configuration.authn?.bearerToken');
-				writer.writeLine('if ($bearerToken)').write('$localHdrs[').quote('authorization').write('] = ').quote('Bearer ').write(' + $bearerToken;');
-			}
-			if (m.security?.httpAuth?.basic) {
-				writer.writeLine('const $userName = typeof this.configuration.authn?.userName === \'function\' ? this.configuration.authn.userName(`${$serviceUrl}`) : this.configuration.authn?.userName');
-				writer.writeLine('const $password = typeof this.configuration.authn?.password === \'function\' ? this.configuration.authn.password(`${$serviceUrl}`, $userName) : this.configuration.authn?.password');
-				writer.writeLine('if ($userName && $password)').write('$localHdrs[').quote('authorization').write('] = ').quote('Basic ').write(' + btoa($userName + \':\' + $password);');
-			}
 			writer.write('if (hdrsOrRsp && typeof hdrsOrRsp === ').quote('object').write(')').indent().writeLine(`Object.keys(hdrsOrRsp).forEach(v => {`)
 				.writeLine(`$localHdrs[v.toLowerCase()] = hdrsOrRsp[v];`)
 				.writeLine(`});`);
 			const queryParams = m.parameters.filter(p => p.nodeKind === 'parameter' && p.oae.in === 'query');
+			writer.writeLine('const $queryParams = [];');
 			if (queryParams.length > 0) {
-				writer.writeLine('const $queryParams = [];');
 				queryParams.forEach(p => {
 					if (!p.required)
 						writer.writeLine(`if (typeof ${p.getIdentifier()} !== 'undefined')`);
 					writer.writeLine(`$queryParams.push(${makeSerializeParameterTxt(p as ParameterParameter)});`);
 				});
-				writer.writeLine('if ($queryParams.length > 0)').writeLine(`$serviceUrl += '?' + $queryParams.join('&');`);
 			}
-			const body = m.parameters.filter(p => p.nodeKind === 'request')[0] as ParameterRequestBody;
 			const cookieParams = m.parameters.filter(p => p.nodeKind === 'parameter' && p.oae.in === 'cookie');
-			writer.writeLine('const $opts = {} as Record<string, any>;');
-			writer.writeLine('if (Object.keys($localHdrs).length > 0)').writeLine('$opts.headers = $localHdrs;');
-			if (cookieParams.length > 0) {
-				writer.writeLine('const $withCred = typeof this.configuration.authn?.withCredentials === \'function\' ? this.configuration.authn.withCredentials(`${$serviceUrl}`) : this.configuration.authn?.withCredentials;');
-				writer.writeLine(`if (typeof $withCred === 'boolean')`).writeLine('$opts.withCredentials = $withCred;');
+			const body = m.parameters.filter(p => p.nodeKind === 'request')[0] as ParameterRequestBody;
+			writer.writeLine(`const $opDesc = {id:'${m.getIdentifier()}', pattern:'${m.pattern}', method:'${m.httpMethod}'};`);
+			writer.writeLine(`let $pre: Promise<string | boolean | void> = this.config.enhanceReq ? this.config.enhanceReq($opDesc, $serviceUrl, $localHdrs, $queryParams) : Promise.resolve(${cookieParams.length > 0 ? 'true' : ''});`);
+			let sec = m.document.security ?? [];
+			if (Array.isArray(m.oae.security))
+				sec = m.oae.security;
+			if (sec.length > 0) {
+				writer.writeLine('if (this.config.ensureAuth) {')
+					.writeLine(`const $security = ${json5Stringify(sec)};`)
+					.writeLine(`$pre = $pre.then(c => {`)
+					.writeLine(`return this.config.ensureAuth($opDesc, $security, $serviceUrl, $localHdrs, $queryParams).then(() => c);`)
+					.writeLine('});')
+					.writeLine('}');
 			}
-			writer.write('const $rsp = this.httpClient.')
+			writer.writeLine('const $rsp = $pre.then((c) => {')
+				.writeLine('if ($queryParams.length > 0)')
+				.writeLine(`$serviceUrl += '?' + $queryParams.join('&');`)
+				.writeLine('const $opts = {} as Record<string, any>;')
+				.writeLine('if (Object.keys($localHdrs).length > 0)')
+				.writeLine('$opts.headers = $localHdrs;')
+				.writeLine('if (c)')
+				.writeLine('$opts.credentials = c;')
+				.write('return this.httpClient.')
 				.write(m.httpMethod.toLowerCase())
 				.write('(')
 				.write('$serviceUrl,');
@@ -428,7 +420,7 @@ export class TsClientGenerator extends TsMorphBase {
 				writer.write(`stringifyRequestBody(${body.getIdentifier()}, ${secondParam}), `);
 			}
 			writer.write('$opts);');
-			writer.newLine();
+			writer.writeLine('});');
 			writer.write('if (rsp !== \'http\')').indent().writeLine('return $rsp.then(r => r.data as any);');
 			writer.writeLine('return $rsp;');
 		});

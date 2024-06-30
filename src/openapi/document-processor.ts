@@ -12,7 +12,7 @@ export class OpenApiInputProcessor {
 	constructor() {
 	}
 
-	async optimize(location: string | string[], strict?: boolean, elevate?: boolean, envVars?: string[]): Promise<TargetOpenAPI.Document> {
+	async merge(location: string | string[], strict?: boolean, envVars?: string[]): Promise<TargetOpenAPI.Document> {
 		let doc: TargetOpenAPI.Document;
 		let enforceStrict = strict;
 		const parser = new SwaggerParser();
@@ -22,8 +22,7 @@ export class OpenApiInputProcessor {
 					const p = new SwaggerParser();
 					if (strict)
 						await p.validate(loc);
-					const doc = await p.parse(loc);
-					return doc;
+					return await p.parse(loc);
 				}
 				catch(e:any) {
 					if (e instanceof SyntaxError && safeLStatSync(loc)) {
@@ -46,7 +45,12 @@ export class OpenApiInputProcessor {
 						deletes.push(() => {
 							delete object[key];
 						});
-						object[key.substring(1)] = srcValue;
+						if (srcValue === null)  // dyflex-config supports a null replacement, but that has no meaning in OpenAPI, so we leverage that to mean 'delete'.
+							deletes.push(() => {
+								delete object[key.substring(1)];
+							});
+						else
+							object[key.substring(1)] = srcValue;
 					}
 					else if (Array.isArray(objValue))
 						return lodashUnion(objValue, srcValue);
@@ -67,12 +71,21 @@ export class OpenApiInputProcessor {
 		}
 		initResolver(parser);
 		uplevelPaths(doc);
-		if (elevate)
-			hoistNamedObjectSchemas(doc);
 
 		if (Array.isArray(envVars))
 			envVars.forEach(d => lodashSet(doc, d, undefined));
 
+		return doc;
+	}
+
+	async optimize(doc: TargetOpenAPI.Document, elevate?: Record<string, string> | boolean): Promise<TargetOpenAPI.Document> {
+		Object.keys(doc.components.schemas).forEach(key => {
+			if (! doc.components.schemas[key]['$ref'])
+				if (!doc.components.schemas[key]['x-schema-name'])
+					doc.components.schemas[key]['x-schema-name'] = key;
+		});
+		if (elevate)
+			hoistNamedObjectSchemas(doc, elevate);
 		return doc;
 	}
 

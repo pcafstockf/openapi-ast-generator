@@ -58,7 +58,8 @@ export const BaseCodeGenConfig = {
 	role: 'client' as 'client' | 'server',
 	target: 'browser' as 'browser' | 'node' | 'any',
 	emitDescriptions: true,
-	generators: {} as Record<string, any>
+	generators: {} as Record<string, any>,
+	xSchemaNameMap: undefined as Record<string, any>
 };
 
 export const ClientCodeGenConfig = {

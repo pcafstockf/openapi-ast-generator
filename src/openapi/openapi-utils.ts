@@ -2,7 +2,10 @@
 
 import SwaggerParser from '@apidevtools/swagger-parser';
 import lodash from 'lodash';
+import {stringify as json5Stringify} from 'json5';
+import os from 'node:os';
 import {OpenAPIV3} from 'openapi-types';
+import {pascalCase} from '../codegen/name-utils';
 import {TargetOpenAPI} from '../openapi-supported-versions';
 
 let parserRefs: SwaggerParser.$Refs;
@@ -94,7 +97,23 @@ export function resolveTopLevelAliases(doc: TargetOpenAPI.Document) {
 /**
  * Walk document (deeply), to find inline object schema, hoist each schema to global context, and modify the parent to reference it.
  */
-export function hoistNamedObjectSchemas(doc: TargetOpenAPI.Document) {
+export function hoistNamedObjectSchemas(doc: TargetOpenAPI.Document, xSchemaNameMap?: Record<string, string> | true) {
+	const tmpMap: Record<string, boolean> = {};
+	function nameIfMapped(schema: TargetOpenAPI.SchemaObject, genName: string) {
+		if (typeof xSchemaNameMap === 'boolean') {
+			if (! tmpMap[genName]) {
+				const hint = (schema.title || schema.description || pascalCase(genName)).replace(/\r?\n/g, ' ');
+				process.stderr.write(`'${genName}' : "${hint}: ${json5Stringify(schema).replace(/\r?\n/g, ' ')}",${os.EOL}`);
+				tmpMap[genName] = true;
+			}
+		}
+		else {
+			if (!xSchemaNameMap[genName])
+				genName = genName.toLowerCase()
+			if (typeof xSchemaNameMap[genName] === 'string')
+				schema['x-schema-name'] = xSchemaNameMap[genName];
+		}
+	}
 	function isHoistableSchema(schema: TargetOpenAPI.SchemaObject) {
 		return typeof schema['x-schema-name'] === 'string' && schema['x-schema-name'];
 	}
@@ -122,7 +141,10 @@ export function hoistNamedObjectSchemas(doc: TargetOpenAPI.Document) {
 			let s: TargetOpenAPI.SchemaObject;
 			let r: TargetOpenAPI.ReferenceObject;
 			// First we recursively search.
+			let propNames = 'O';
+			let hasAdd = false;
 			if (typeof schema.additionalProperties === 'object') {
+				hasAdd = true;
 				s = resolveIfRef(schema.additionalProperties).obj;
 				r = searchSchema(s);
 				if (r)
@@ -130,12 +152,20 @@ export function hoistNamedObjectSchemas(doc: TargetOpenAPI.Document) {
 			}
 			if (schema.properties) {
 				Object.keys(schema.properties).forEach(name => {
+					propNames += name;
+					if (Array.isArray(schema.required))
+						if (schema.required.indexOf(name) >= 0)
+							propNames += '!';
 					s = resolveIfRef(schema.properties[name]).obj;
 					r = searchSchema(s);
 					if (r)
 						lodash.set(schema.properties, name, r);
 				});
 			}
+			if (hasAdd)
+				propNames += '+'
+			if (propNames && xSchemaNameMap && (!isHoistableSchema(schema)))
+				nameIfMapped(schema, propNames);
 
 			function searchSchemaArray(schemas: (TargetOpenAPI.ReferenceObject | TargetOpenAPI.SchemaObject)[]) {
 				if (Array.isArray(schemas)) {
@@ -157,10 +187,15 @@ export function hoistNamedObjectSchemas(doc: TargetOpenAPI.Document) {
 				if (r)
 					lodash.set(schema, 'not', r);
 			}
-			// Now decide hoistability for ourselves.
-			if (isHoistableSchema(schema))
-				return hoistSchema(schema);
 		}
+		else if (schema.type === 'string' && Array.isArray(schema.enum)) {
+			let elemNames = 'E' + schema.enum.join('');
+			if (elemNames && xSchemaNameMap && (!isHoistableSchema(schema)))
+				nameIfMapped(schema, elemNames);
+		}
+		// Now decide hoistability for ourselves.
+		if (isHoistableSchema(schema))
+			return hoistSchema(schema);
 	}
 
 	function searchParams(params: (TargetOpenAPI.ReferenceObject | TargetOpenAPI.ParameterBaseObject)[]) {
@@ -179,6 +214,11 @@ export function hoistNamedObjectSchemas(doc: TargetOpenAPI.Document) {
 				if (ref)
 					lodash.set(targ, targPropName, ref);
 			}
+			else if (schema.type === 'string' && Array.isArray(schema.enum)) {
+				const ref = searchSchema(schema);
+				if (ref)
+					lodash.set(targ, targPropName, ref);
+			}
 		});
 	}
 
@@ -193,6 +233,11 @@ export function hoistNamedObjectSchemas(doc: TargetOpenAPI.Document) {
 				schema = resolveIfRef(schema.items).obj;
 			}
 			if (schema.type === 'object') {
+				const ref = searchSchema(schema);
+				if (ref)
+					lodash.set(targ, targPropName, ref);
+			}
+			else if (schema.type === 'string' && Array.isArray(schema.enum)) {
 				const ref = searchSchema(schema);
 				if (ref)
 					lodash.set(targ, targPropName, ref);

@@ -12,7 +12,7 @@ export interface HttpResponse<T = string | ArrayBuffer | object | number | boole
  */
 export interface HttpOptions {
 	headers?: Record<string, string | string[]>;
-	withCredentials?: boolean;
+	credentials?: string | boolean;
 }
 
 /**

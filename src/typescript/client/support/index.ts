@@ -1,16 +1,28 @@
 import {InjectionToken} from 'async-injection';
 import {HttpClient} from './http-client';
 
+/**
+ * Fingerprint of a remote operation call passed to the configuration callbacks.
+ */
+interface OperationDesc {
+	/**
+	 * Operation id as defined in the OpenApi specification document.
+	 */
+	id: string;
+	/**
+	 * OpenApi operation pattern (e.g. /pet/{petId}).
+	 */
+	pattern: string;
+	/**
+	 * OpenApi operation method (get, post, put, etc.).
+	 */
+	method: string;
+}
+
 export interface ApiClientConfig {
 	baseURL?: string;
-	headers?: Record<string, string> | ((opId: string, path: string, meth: string) => Record<string, string>);
-	authn?: {
-		username?: string | ((opId: string, path: string, meth: string) => string);
-		password?: string | ((opId: string, path: string, meth: string, username: string) => string);
-		apiKeys?: Record<string, string> | ((opId: string, path: string, meth: string) => Record<string, string>);
-		bearerToken?: string | ((opId: string, path: string, meth: string) => string);
-		withCredentials?: boolean | ((opId: string, path: string, meth: string) => boolean);
-	};
+	enhanceReq?: (op: OperationDesc, urlPath: string, hdrs: Record<string, string>, querys: string[]) => Promise<undefined | 'omit' | 'same-origin' | 'include'>;
+	ensureAuth?: (op: OperationDesc, security: Record<string, string[]>[], urlPath: string, hdrs: Record<string, string>, querys: string[]) => Promise<void>;
 }
 
 export * from './http-client';

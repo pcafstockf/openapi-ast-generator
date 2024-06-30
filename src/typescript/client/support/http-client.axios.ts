@@ -1,4 +1,4 @@
-// noinspection JSUnusedGlobalSymbols
+// noinspection JSUnusedGlobalSymbols,SpellCheckingInspection,ES6ShorthandObjectProperty
 
 import axios, {AxiosRequestConfig} from 'axios';
 /**
@@ -9,32 +9,62 @@ import {HttpClient, HttpOptions, HttpResponse} from './http-client';
 function AxiosHttpClientSubclass(): HttpClient & { ensureError(err: unknown): Error } {
 	return {
 		head(url: string, opts?: HttpOptions): Promise<HttpResponse<void>> {
-			return super.head(url, opts).catch((e: any) => {
+			const aopts: AxiosRequestConfig = {
+				...(opts ?? {}),
+				withCredentials: opts?.credentials ? !!opts.credentials : undefined
+			};
+			delete (aopts as HttpOptions).credentials;
+			return super.head(url, aopts).catch((e: any) => {
 				throw this.ensureError(e);
 			});
 		},
 		get<T = any>(url: string, opts?: HttpOptions): Promise<HttpResponse<T>> {
-			return super.get(url, opts).catch((e: any) => {
+			const aopts: AxiosRequestConfig = {
+				...(opts ?? {}),
+				withCredentials: opts?.credentials ? !!opts.credentials : undefined
+			};
+			delete (aopts as HttpOptions).credentials;
+			return super.get(url, aopts).catch((e: any) => {
 				throw this.ensureError(e);
 			});
 		},
 		post<T = any>(url: string, body?: any, opts?: HttpOptions): Promise<HttpResponse<T>> {
-			return super.post(url, body, opts).catch((e: any) => {
+			const aopts: AxiosRequestConfig = {
+				...(opts ?? {}),
+				withCredentials: opts?.credentials ? !!opts.credentials : undefined
+			};
+			delete (aopts as HttpOptions).credentials;
+			return super.post(url, body, aopts).catch((e: any) => {
 				throw this.ensureError(e);
 			});
 		},
 		put<T = any>(url: string, body?: any, opts?: HttpOptions): Promise<HttpResponse<T>> {
+			const aopts: AxiosRequestConfig = {
+				...(opts ?? {}),
+				withCredentials: opts?.credentials ? !!opts.credentials : undefined
+			};
+			delete (aopts as HttpOptions).credentials;
 			return super.put(url, body, opts).catch((e: any) => {
 				throw this.ensureError(e);
 			});
 		},
 		patch<T = any>(url: string, body?: any, opts?: HttpOptions): Promise<HttpResponse<T>> {
-			return super.patch(url, body, opts).catch((e: any) => {
+			const aopts: AxiosRequestConfig = {
+				...(opts ?? {}),
+				withCredentials: opts?.credentials ? !!opts.credentials : undefined
+			};
+			delete (aopts as HttpOptions).credentials;
+			return super.patch(url, body, aopts).catch((e: any) => {
 				throw this.ensureError(e);
 			});
 		},
 		delete<T = any>(url: string, opts?: HttpOptions): Promise<HttpResponse<T>> {
-			return super.delete(url, opts).catch((e: any) => {
+			const aopts: AxiosRequestConfig = {
+				...(opts ?? {}),
+				withCredentials: opts?.credentials ? !!opts.credentials : undefined
+			};
+			delete (aopts as HttpOptions).credentials;
+			return super.delete(url, aopts).catch((e: any) => {
 				throw this.ensureError(e);
 			});
 		},

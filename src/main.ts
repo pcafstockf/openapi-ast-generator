@@ -228,8 +228,12 @@ export async function prepare(args: CLIOptionsType) {
 
 	// Build and optimize the input document.
 	const docProcessor = new OpenApiInputProcessor();
-	let doc = await docProcessor.optimize(config.cmdLine.m?.length > 0 ? [config.cmdLine.i].concat(...config.cmdLine.m) : config.cmdLine.i, config.cmdLine.s, config.cmdLine.e, config.cmdLine.X);
-	// Allow any custom transformers a crack at the bundle before we write it out.
+	let doc = await docProcessor.merge(
+		config.cmdLine.m?.length > 0 ? [config.cmdLine.i].concat(...config.cmdLine.m) : config.cmdLine.i,
+		config.cmdLine.s,
+		config.cmdLine.X
+	);
+	// Allow any custom transformers a crack at the bundle before we apply our own optimizations.
 	let plugins = config.cmdLine.t;
 	if (plugins && typeof plugins === 'string')
 		plugins = [plugins];
@@ -241,6 +245,11 @@ export async function prepare(args: CLIOptionsType) {
 				doc = result;
 		}
 	}
+	doc = await docProcessor.optimize(
+		doc,
+		config.cmdLine.e ? globalThis.codeGenConfig.xSchemaNameMap ?? true : false
+	);
+
 	// Write the bundle.
 	if (config.cmdLine.b) {
 		if (!safeLStatSync(path.dirname(config.cmdLine.b)))

@@ -8,9 +8,41 @@ import {ParameterParameter, ParameterParameterJson} from './parameter-parameter'
 import {ParameterRequestBody, ParameterRequestBodyJson} from './parameter-requestbody';
 import {ReturnResponses, ReturnResponsesJson} from './return-responses';
 
+interface OAuthFlow {
+	/**
+	 * The available scopes for the OAuth2 security scheme.
+	 * A map between the scope name and a short description for it.
+	 * The map MAY be empty.
+	 */
+	scopes: Record<string, string>;
+	/**
+	 * The URL to be used for obtaining refresh tokens. This MUST be in the form of a URL.
+	 * The OAuth2 standard requires the use of TLS.
+	 */
+	refreshUrl?: string;
+	/**
+	 * The authorization URL to be used for this flow. This MUST be in the form of a URL.
+	 * The OAuth2 standard requires the use of TLS.
+	 * Only 'picked' for "implicit", "authorizationCode" (see below).
+	 */
+	authorizationUrl: string;
+	/**
+	 * The token URL to be used for this flow. This MUST be in the form of a URL.
+	 * The OAuth2 standard requires the use of TLS.
+	 * Only 'picked' for "password", "clientCredentials", "authorizationCode" (see below)
+	 */
+	tokenUrl: string;
+}
+
 export interface MethodSecurity {
 	httpAuth?: { basic?: boolean, bearer?: string };
 	apiKey?: Record<'header' | 'query' | 'cookie', string[]>;
+	oauth2?: {
+		implicit?: Pick<OAuthFlow, 'scopes' | 'refreshUrl' | 'authorizationUrl'>;
+		password?:  Pick<OAuthFlow, 'scopes' | 'refreshUrl' | 'tokenUrl'>;
+		clientCredentials?: Pick<OAuthFlow, 'scopes' | 'refreshUrl' | 'tokenUrl'>; // called application in v2 spec
+		authorizationCode?: OAuthFlow; // called accessCode in v2 spec
+	};
 }
 
 export interface MethodOperationJson extends LangNeutralJson {
@@ -124,6 +156,10 @@ export class MethodOperation implements LangNeutral {
 									retVal.httpAuth.bearer = ss.bearerFormat;
 									break;
 							}
+							break;
+						case 'oauth2':
+							retVal.oauth2 = retVal.oauth2 || {};
+							Object.assign(retVal.oauth2, ss.flows);
 							break;
 					}
 				});
