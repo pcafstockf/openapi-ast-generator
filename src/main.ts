@@ -247,7 +247,8 @@ export async function prepare(args: CLIOptionsType) {
 	}
 	doc = await docProcessor.optimize(
 		doc,
-		config.cmdLine.e ? globalThis.codeGenConfig.xSchemaNameMap ?? true : false
+		config.cmdLine.i,
+		!!config.cmdLine.e
 	);
 
 	// Write the bundle.
@@ -258,7 +259,7 @@ export async function prepare(args: CLIOptionsType) {
 	}
 
 	// Now prepare the document for code generation.
-	doc = await docProcessor.internalize(config.cmdLine.i, doc);
+	doc = await docProcessor.internalize(doc);
 
 	//FUTURE: This is where we would determine which transformer and generator to use if we support new code targets.
 	const generator = new LanguageNeutralGenerator();

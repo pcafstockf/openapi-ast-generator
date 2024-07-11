@@ -1,11 +1,11 @@
 // noinspection DuplicatedCode
 
 import SwaggerParser from '@apidevtools/swagger-parser';
-import lodash from 'lodash';
-import {stringify as json5Stringify} from 'json5';
+import {set as lodashSet, setWith as lodashSetWith} from 'lodash';
 import os from 'node:os';
+import {stringify as json5Stringify} from 'json5';
 import {OpenAPIV3} from 'openapi-types';
-import {pascalCase} from '../codegen/name-utils';
+import {kebabCase, pascalCase} from '../codegen/name-utils';
 import {TargetOpenAPI} from '../openapi-supported-versions';
 
 let parserRefs: SwaggerParser.$Refs;
@@ -45,10 +45,11 @@ export function resolveIfRef<T = any>(obj: any): { obj: T, ref?: string } {
  * It is critical that this function be called as soon as the @see SwaggerParser has finished parsing and before any of the other OaEG code runs.
  * It initializes a private global variable that allows the @see resolveIfRef function to work (which is the heart of much of what we do).
  */
-export function initResolver(parser: SwaggerParser): void {
-	if (parserRefs)
-		throw new Error('Resolver already initialized.');
-	parserRefs = parser.$refs;
+export function initResolver(r: SwaggerParser | SwaggerParser.$Refs): void {
+	if ((r as SwaggerParser).$refs)
+		parserRefs = (r as SwaggerParser).$refs;
+	else
+		parserRefs = r as typeof parserRefs;
 }
 
 /**
@@ -79,40 +80,38 @@ export function uplevelPaths(doc: TargetOpenAPI.Document) {
 			const objTypePath = hash.substring(2, hash.lastIndexOf('/')).replace('/', '.');    // -> parameters
 			const $refName = hash.substring(hash.lastIndexOf('/') + 1); // -> Page
 			const refNamePath = objTypePath + '.' + $refName;
-			lodash.set(doc, refNamePath, {$ref: '#/paths' + pp});
+			lodashSet(doc, refNamePath, {$ref: '#/paths' + pp});
 		}
 	});
-}
-
-export function resolveTopLevelAliases(doc: TargetOpenAPI.Document) {
-	const components = doc.components as TargetOpenAPI.ComponentsObject;
-	Object.keys(components.schemas).forEach(componentKey => {
-		const s = components.schemas[componentKey];
-		components.schemas[componentKey] = resolveIfRef(s).obj;
-		if (! (components.schemas[componentKey] as TargetOpenAPI.SchemaObject).title)
-			(components.schemas[componentKey] as TargetOpenAPI.SchemaObject).title = componentKey;
-	});
+	delete (doc as any).pathdefs;
 }
 
 /**
- * Walk document (deeply), to find inline object schema, hoist each schema to global context, and modify the parent to reference it.
+ * Walk document (deeply), to find inline object schema.
+ * IF a schema has a title or 'x-schema-name', hoist it to global context, and modify the parent to reference it.
+ * IF a schema is just a $ref, abort any deeper recursion.
+ * IF a (resolved) schema does *not* have a title or 'x-schema-name', capture that and record it as missing.
  */
-export function hoistNamedObjectSchemas(doc: TargetOpenAPI.Document, xSchemaNameMap?: Record<string, string> | true) {
-	const tmpMap: Record<string, boolean> = {};
+export function hoistNamedObjectSchemas(doc: TargetOpenAPI.Document, reportMissing: boolean) {
+	function resolveIfNOTRef<T = any>(obj: any): { obj: T, ref?: string } {
+		let ref = obj && (typeof (obj as TargetOpenAPI.ReferenceObject).$ref === 'string') ? (obj as TargetOpenAPI.ReferenceObject).$ref : undefined;
+		if (ref)
+			return undefined;
+		return {
+			obj: obj,
+			ref: undefined
+		};
+	}
+
+	const missingLocations: Record<string, string> = {};
+	let docPath: string[] = [];
 	function nameIfMapped(schema: TargetOpenAPI.SchemaObject, genName: string) {
-		if (typeof xSchemaNameMap === 'boolean') {
-			if (! tmpMap[genName]) {
-				const hint = (schema.title || schema.description || pascalCase(genName)).replace(/\r?\n/g, ' ');
-				process.stderr.write(`'${genName}' : "${hint}: ${json5Stringify(schema).replace(/\r?\n/g, ' ')}",${os.EOL}`);
-				tmpMap[genName] = true;
-			}
-		}
-		else {
-			if (!xSchemaNameMap[genName])
-				genName = genName.toLowerCase()
-			if (typeof xSchemaNameMap[genName] === 'string')
-				schema['x-schema-name'] = xSchemaNameMap[genName];
-		}
+		if (schema['x-ignore'] || schema['x-ignore-client'] || schema['x-ignore-server'])
+			return;
+		if (schema.title || schema['x-schema-name'])
+			return;
+		const location = docPath.join('.').substring(2);
+		missingLocations[location] = pascalCase(kebabCase(genName));
 	}
 	function isHoistableSchema(schema: TargetOpenAPI.SchemaObject) {
 		return typeof schema['x-schema-name'] === 'string' && schema['x-schema-name'];
@@ -130,50 +129,63 @@ export function hoistNamedObjectSchemas(doc: TargetOpenAPI.Document, xSchemaName
 
 	function searchSchema(schema: TargetOpenAPI.SchemaObject): TargetOpenAPI.ReferenceObject | undefined {
 		if (schema.type === 'array') {
-			const i = resolveIfRef(schema.items)?.obj;
-			if (i) {
-				let r = searchSchema(i);
+			const res = resolveIfNOTRef(schema.items);
+			if (res?.obj) {
+				docPath.push('items');
+				let r = searchSchema(res!.obj);
+				docPath.pop();
 				if (r)
-					lodash.set(schema, 'items', r);
+					lodashSet(schema, 'items', r);
 			}
 		}
 		else if (schema.type === 'object') {
 			let s: TargetOpenAPI.SchemaObject;
 			let r: TargetOpenAPI.ReferenceObject;
 			// First we recursively search.
-			let propNames = 'O';
+			const propzNames = [];
 			let hasAdd = false;
 			if (typeof schema.additionalProperties === 'object') {
 				hasAdd = true;
-				s = resolveIfRef(schema.additionalProperties).obj;
-				r = searchSchema(s);
-				if (r)
-					lodash.set(schema, 'additionalProperties', r);
+				const res = resolveIfNOTRef(schema.additionalProperties);
+				if (res?.obj) {
+					r = searchSchema(res!.obj);
+					if (r)
+						lodashSet(schema, 'additionalProperties', r);
+				}
 			}
 			if (schema.properties) {
+				docPath.push('properties');
 				Object.keys(schema.properties).forEach(name => {
-					propNames += name;
+					docPath.push(name);
+					let propzName = name;
 					if (Array.isArray(schema.required))
 						if (schema.required.indexOf(name) >= 0)
-							propNames += '!';
-					s = resolveIfRef(schema.properties[name]).obj;
-					r = searchSchema(s);
-					if (r)
-						lodash.set(schema.properties, name, r);
+							propzName += '!';
+					propzNames.push(name);
+					const res =  resolveIfNOTRef(schema.properties[name]);
+					if (res?.obj) {
+						r = searchSchema(res!.obj);
+						if (r)
+							lodashSet(schema.properties, name, r);
+					}
+					docPath.pop();
 				});
+				docPath.pop();
 			}
-			if (hasAdd)
-				propNames += '+'
-			if (propNames && xSchemaNameMap && (!isHoistableSchema(schema)))
-				nameIfMapped(schema, propNames);
+			if (propzNames.length > 0) {
+				propzNames.sort();
+				nameIfMapped(schema, `O${propzNames.join('%')}${hasAdd ? '+' : ''}`);
+			}
 
 			function searchSchemaArray(schemas: (TargetOpenAPI.ReferenceObject | TargetOpenAPI.SchemaObject)[]) {
 				if (Array.isArray(schemas)) {
 					schemas.forEach((elem, idx) => {
-						s = resolveIfRef(elem).obj;
-						r = searchSchema(s);
-						if (r)
-							schemas[idx] = r;
+						const res = resolveIfNOTRef(elem);
+						if (res?.obj) {
+							r = searchSchema(res!.obj);
+							if (r)
+								schemas[idx] = r;
+						}
 					});
 				}
 			}
@@ -182,16 +194,18 @@ export function hoistNamedObjectSchemas(doc: TargetOpenAPI.Document, xSchemaName
 			searchSchemaArray(schema.oneOf);
 			searchSchemaArray(schema.anyOf);
 			if (schema.not) {
-				s = resolveIfRef(schema.not).obj;
-				r = searchSchema(s);
-				if (r)
-					lodash.set(schema, 'not', r);
+				const res = resolveIfNOTRef(schema.not);
+				if (res?.obj) {
+					r = searchSchema(res!.obj);
+					if (r)
+						lodashSet(schema, 'not', r);
+				}
 			}
 		}
 		else if (schema.type === 'string' && Array.isArray(schema.enum)) {
-			let elemNames = 'E' + schema.enum.join('');
-			if (elemNames && xSchemaNameMap && (!isHoistableSchema(schema)))
-				nameIfMapped(schema, elemNames);
+			const elems = schema.enum.slice(0).sort();
+			if (elems.length > 0)
+				nameIfMapped(schema, `E${elems.join('%')}`);
 		}
 		// Now decide hoistability for ourselves.
 		if (isHoistableSchema(schema))
@@ -199,104 +213,194 @@ export function hoistNamedObjectSchemas(doc: TargetOpenAPI.Document, xSchemaName
 	}
 
 	function searchParams(params: (TargetOpenAPI.ReferenceObject | TargetOpenAPI.ParameterBaseObject)[]) {
-		params?.forEach((p) => {
-			const param = resolveIfRef(p).obj;
-			let schema: TargetOpenAPI.SchemaObject = resolveIfRef(param.schema).obj;
-			let targ: any = param;
-			let targPropName = 'schema';
-			while (schema.type === 'array') {
-				targ = schema;
-				targPropName = 'items';
-				schema = resolveIfRef(schema.items).obj;
+		params?.forEach((p: TargetOpenAPI.ParameterBaseObject, idx) => {
+			const prevDocPathLen = docPath.length;
+			docPath.push(`[${idx}]`);
+			let resIdx = resolveIfNOTRef(p);
+			if (resIdx?.obj) {
+				const param = resIdx.obj;
+				let resParam = resolveIfNOTRef(param.schema);
+				if (resParam?.obj) {
+					docPath.push(`schema`);
+					let s: TargetOpenAPI.SchemaObject = resParam.obj;
+					let targ: any = param;
+					let targPropName = 'schema';
+					while (s && s.type === 'array') {
+						targ = s;
+						targPropName = 'items';
+						docPath.push(`items`); // This should be in an index?
+						resParam = resolveIfNOTRef(s.items);
+						s = resParam?.obj;
+					}
+					if (s) {
+						if (s.type === 'object') {
+							const ref = searchSchema(s);
+							if (ref)
+								lodashSet(targ, targPropName, ref);
+						}
+						else if (s.type === 'string' && Array.isArray(s.enum)) {
+							const ref = searchSchema(s);
+							if (ref)
+								lodashSet(targ, targPropName, ref);
+						}
+					}
+				}
 			}
-			if (schema.type === 'object') {
-				const ref = searchSchema(schema);
-				if (ref)
-					lodash.set(targ, targPropName, ref);
-			}
-			else if (schema.type === 'string' && Array.isArray(schema.enum)) {
-				const ref = searchSchema(schema);
-				if (ref)
-					lodash.set(targ, targPropName, ref);
-			}
+			docPath.length = prevDocPathLen;
 		});
 	}
-
-	function searchMediaTypes(media: TargetOpenAPI.MediaTypeObject[]) {
-		media?.forEach((m) => {
+	function searchMediaTypes(media: {[media: string]: TargetOpenAPI.MediaTypeObject}) {
+		Object.keys(media ?? {}).forEach((key) => {
+			const m = media[key];
+			if (! m.schema)
+				return; // If no schema, nothing to do.
+			const prevDocPathLen = docPath.length;
+			docPath.push(key);
 			let targ: any = m;
 			let targPropName = 'schema';
-			let schema = resolveIfRef(m.schema).obj;
-			while (schema.type === 'array') {
-				targ = schema;
-				targPropName = 'items';
-				schema = resolveIfRef(schema.items).obj;
+			let res = resolveIfNOTRef(m.schema);
+			if (res?.obj) {
+				let s = res.obj;
+				docPath.push('schema');
+				while (s && s.type === 'array') {
+					targ = s;
+					targPropName = 'items';
+					docPath.push('items');
+					res = resolveIfNOTRef(s.items);
+					s = res?.obj;
+				}
+				if (s) {
+					if (s.type === 'object') {
+						const ref = searchSchema(s);
+						if (ref)
+							lodashSet(targ, targPropName, ref);
+					}
+					else if (s.type === 'string' && Array.isArray(s.enum)) {
+						const ref = searchSchema(s);
+						if (ref)
+							lodashSet(targ, targPropName, ref);
+					}
+				}
 			}
-			if (schema.type === 'object') {
-				const ref = searchSchema(schema);
-				if (ref)
-					lodash.set(targ, targPropName, ref);
-			}
-			else if (schema.type === 'string' && Array.isArray(schema.enum)) {
-				const ref = searchSchema(schema);
-				if (ref)
-					lodash.set(targ, targPropName, ref);
-			}
+			docPath.length = prevDocPathLen;
 		});
 	}
 
 	function searchRequestBodies(requestBodies: (TargetOpenAPI.ReferenceObject | TargetOpenAPI.RequestBodyObject)[]) {
 		requestBodies?.forEach(r => {
-			const media = resolveIfRef<TargetOpenAPI.RequestBodyObject>(r).obj.content;
-			if (media)
-				searchMediaTypes(Object.values(media));
+			const media = resolveIfNOTRef<TargetOpenAPI.RequestBodyObject>(r)?.obj?.content;
+			if (media) {
+				docPath.push('content');
+				searchMediaTypes(media);
+				docPath.pop();
+			}
 		});
 	}
 
-	function searchResponses(responses: (TargetOpenAPI.ReferenceObject | TargetOpenAPI.ResponseObject)[]) {
-		responses?.forEach(r => {
-			const rsp = resolveIfRef(r).obj;
-			if (rsp.headers)
-				searchParams(Object.values(rsp.headers));
-			if (rsp.content)
-				searchMediaTypes(Object.values(rsp.content));
+	function searchResponses(responses: TargetOpenAPI.ResponsesObject) {
+		Object.keys(responses ?? {}).forEach(code => {
+			docPath.push(code);
+			const res = resolveIfNOTRef(responses[code]);
+			if (res?.obj) {
+				const rsp = res.obj;
+				if (rsp.headers) {
+					docPath.push('headers');
+					searchParams(Object.values(rsp.headers));
+					docPath.pop();
+				}
+				if (rsp.content) {
+					docPath.push('content');
+					searchMediaTypes(rsp.content);
+					docPath.pop();
+				}
+			}
+			docPath.pop();
 		});
 	}
 
-	function searchPathItems(pathItems: (TargetOpenAPI.ReferenceObject | TargetOpenAPI.PathItemObject)[]) {
-		pathItems?.forEach((i) => {
-			let pi: TargetOpenAPI.PathItemObject = resolveIfRef(i).obj;
-			searchParams(pi.parameters);
-			const methods = HttpMethodNames.filter(method => pi[method]);
-			methods.forEach(method => {
-				let opObj: TargetOpenAPI.OperationObject = resolveIfRef(pi[method]).obj;
-				searchParams(opObj.parameters);
-				if (opObj.requestBody)
-					searchRequestBodies([opObj.requestBody]);
-				searchResponses(Object.values(opObj.responses));
-			});
+	function searchPathItems(pathItems: Record<string, TargetOpenAPI.ReferenceObject | TargetOpenAPI.PathItemObject>) {
+		Object.keys(pathItems ?? {}).forEach((key) => {
+			docPath.push(key);
+			const res = resolveIfNOTRef(pathItems[key]);
+			if (res?.obj) {
+				const pi : TargetOpenAPI.PathItemObject = res!.obj;
+				docPath.push('parameters');
+				searchParams(pi.parameters);
+				docPath.pop();
+				const methods = HttpMethodNames.filter(method => pi[method]);
+				methods.forEach(method => {
+					docPath.push(method);
+					const res = resolveIfNOTRef(pi[method]);
+					if (res?.obj) {
+						let opObj: TargetOpenAPI.OperationObject = res.obj;
+						docPath.push('parameters');
+						searchParams(opObj.parameters);
+						docPath.pop();
+						if (opObj.requestBody) {
+							docPath.push('requestBody');
+							searchRequestBodies([opObj.requestBody]);
+							docPath.pop();
+						}
+						docPath.push('responses');
+						searchResponses(opObj.responses);
+						docPath.pop();
+					}
+					docPath.pop();
+				});
+			}
+			docPath.pop();
 		});
 	}
 
-	if (doc.components.schemas) {
-		Object.keys(doc.components.schemas).forEach(name => {
-			const s = resolveIfRef(doc.components.schemas[name]).obj;
-			const r = searchSchema(s);
-			if (r)
-				lodash.set(doc.components.schemas, name, r);
-		});
+	// if (doc.components.schemas) {
+	// 	docPath = ['#','components','schemas'];
+	// 	Object.keys(doc.components.schemas).forEach(name => {
+	// 		const res = resolveIfNOTRef(doc.components.schemas[name]);
+	// 		if (res?.obj) {
+	// 			const s = res.obj;
+	// 			docPath.push(name);
+	// 			const r = searchSchema(s);
+	// 			docPath.pop();
+	// 			if (r)
+	// 				lodashSet(doc.components.schemas, name, r);
+	// 		}
+	// 	});
+	// }
+	// if (doc.components.responses) {
+	// 	docPath = ['#','components','responses'];
+	// 	searchResponses(doc.components.responses);
+	// }
+	// if (doc.components.parameters) {
+	// 	docPath = ['#', 'components', 'parameters'];
+	// 	searchParams(Object.values(doc.components.parameters));
+	// }
+	// if (doc.components.requestBodies) {
+	// 	docPath = ['#', 'components', 'requestBodies'];
+	// 	const media = Object.values(doc.components.requestBodies).map(b => resolveIfNOTRef(b).obj).filter((b: TargetOpenAPI.RequestBodyObject) => b?.content).map((b: TargetOpenAPI.RequestBodyObject) => b.content);
+	// 	media.forEach(m => {
+	// 		searchMediaTypes(m);
+	// 	})
+	// }
+	// if (doc.components.headers) {
+	// 	docPath = ['#', 'components', 'headers'];
+	// 	searchParams(Object.values(doc.components.headers));
+	// }
+	// if (doc.components.callbacks) {
+	// 	docPath = ['#', 'components', 'callbacks'];
+	// 	searchPathItems(doc.components.callbacks);
+	// }
+	docPath = ['#', 'paths'];
+	searchPathItems(doc.paths);
+
+	if (reportMissing) {
+		const locations = Object.keys(missingLocations);
+		if (locations.length > 0) {
+			const docFrag = locations.reduce((frag, key) => {
+				// Lodash 'set' ends up turning numeric *looking* properties into indexes.
+				lodashSetWith(frag, key + '.x-schema-name', missingLocations[key], Object);
+				return frag;
+			}, {});
+			process.stderr.write(`${json5Stringify(docFrag, undefined, ' ')}${os.EOL}`);
+		}
 	}
-	if (doc.components.responses)
-		searchResponses(Object.values(doc.components.responses));
-	if (doc.components.parameters)
-		searchParams(Object.values(doc.components.parameters));
-	if (doc.components.requestBodies) {
-		const media = Object.values(doc.components.requestBodies).map(b => resolveIfRef(b).obj).filter((b: TargetOpenAPI.RequestBodyObject) => b.content).map((b: TargetOpenAPI.RequestBodyObject) => b.content);
-		searchMediaTypes(media);
-	}
-	if (doc.components.headers)
-		searchParams(Object.values(doc.components.headers));
-	if (doc.components.callbacks)
-		searchPathItems(Object.values(doc.components.callbacks));
-	searchPathItems(Object.values(doc.paths));
 }

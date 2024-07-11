@@ -61,6 +61,8 @@ export class TypeSchema implements LangNeutral {
 		const n = this.oae;
 		if (n.title)
 			return n.title;
+		if (n['x-schema-name'])
+			return n['x-schema-name'];
 		return this[ImpliedName];
 	}
 

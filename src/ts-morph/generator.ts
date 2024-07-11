@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {ClassDeclaration, EnumDeclaration, InterfaceDeclaration, JSDocStructure, JSDocTagStructure, KindToNodeMappings, MethodDeclaration, MethodSignature, Node, Project, SourceFile, StructureKind, SyntaxKind, TypeAliasDeclaration, TypeReferenceNode, VariableDeclarationKind, VariableStatement} from 'ts-morph';
 import {CodeGenConfig} from '../codegen/codegen-config';
+import {isValidJsIdentifier} from '../codegen/name-utils';
 import * as nameUtils from '../codegen/name-utils';
 import {ApiTag} from '../lang-neutral/api-tag';
 import {LanguageNeutralDocument} from '../lang-neutral/generator';
@@ -64,15 +65,42 @@ export class TsMorphGenerator extends TsMorphBase {
 	}
 
 	/**
-	 * If the model is not defined in the save file as the 'src' node, ensure there is a node that imports the model into the 'src' file.
+	 * If the model is not defined in the same file as the 'src' node, ensure there is a node that imports the model into the 'src' file.
 	 */
 	protected importModelIfNotSameFile<S extends Node>(src: S, imphortSchema: TypeSchema) {
 		if (imphortSchema) {
-			if (imphortSchema.nodeKind === 'array')
+			while (imphortSchema.nodeKind === 'array')
 				imphortSchema = (imphortSchema as ArraySchema).items;
+			let children: TypeSchema[] = [];
 			const modelNode = this.resolveType(imphortSchema, 'intf');
-			if (!isSameSourceFile(src, modelNode))
-				importIfNotSameFile(src, modelNode, this.tsTypeToText(modelNode));
+			if (imphortSchema.nodeKind === 'record') {
+				// If this is a record, recursively import any property types (just make sure to guard against circular references to this model).
+				children.push(...Array.from((imphortSchema as RecordSchema).properties?.values() ?? []));
+			}
+			const oae = imphortSchema.oae;
+			if (oae.allOf)
+				oae.allOf.map(e => e.$ast).filter(e => !!e).forEach(e => children.push(e));
+			if (oae.anyOf)
+				oae.anyOf.map(e => e.$ast).filter(e => !!e).forEach(e => children.push(e));
+			if (oae.oneOf)
+				oae.oneOf.map(e => e.$ast).filter(e => !!e).forEach(e => children.push(e));
+			if (children.length > 0) {
+				// If this is a record, recursively import any property types (just make sure to guard against circular references to this model).
+				const propTypes: TypeSchema[] = [imphortSchema];
+				children.forEach(ts => {
+					if (propTypes.find(t => Object.is(t, ts) || ts.matches(t)))
+						return;
+					propTypes.push(ts);
+					this.importModelIfNotSameFile(src, ts);
+				});
+			}
+			if (!isSameSourceFile(src, modelNode)) {
+				const txt = this.tsTypeToText(modelNode);
+				// *when* we are recursing (above), we can pass in compound types, and its to much of a pain to figure it out up there.
+				// ultimately we would never import a compound type regardless of how we got here, so just test it now.
+				if (isValidJsIdentifier(txt))
+					importIfNotSameFile(src, modelNode, txt);
+			}
 		}
 	}
 
@@ -614,17 +642,6 @@ export class TsMorphGenerator extends TsMorphBase {
 			}
 		}
 
-		const joinTypesAs = (types: TypeSchema[], typeKind: SyntaxKind) => {
-			// We need to first recursively resolve all the types that are used to compose this one (but we ignore schema that have no type as they are not really schema).
-			const tsTypes = types.filter(e => e.oae.type).map(e => this.resolveType(e, mode));
-			const tsTxts = tsTypes.map(e => this.tsTypeToText(e));
-			let sep = typeKind === SyntaxKind.IntersectionType ? ' & ' : ' | ';
-			if (type.name)
-				return this.typeToNamedAliasType(type, tsTxts.join(sep));
-			// Not certain that
-			return this.typeToInlineType(type, tsTxts.join(sep), tsTypes.length > 1 ? typeKind : SyntaxKind.TypeReference);
-		};
-
 		if (type.nodeKind === 'record') {
 			let intf: InterfaceDeclaration;
 			if (codeGenConfig.modelIntfDir && mode === 'intf') {
@@ -696,23 +713,108 @@ export class TsMorphGenerator extends TsMorphBase {
 			return intf;
 		}
 		else if (type.oae.allOf) {
-			return joinTypesAs(type.allOf, SyntaxKind.UnionType);
+			return this.joinTypesAsIntersection(type, type.allOf, mode);
 		}
 		else if (type.oae.anyOf) {
-			return joinTypesAs(type.anyOf, SyntaxKind.IntersectionType);
+			return this.joinTypesAsUnion(type, type.anyOf, mode);
 		}
 		else if (type.oae.oneOf) {
-			return joinTypesAs(type.oneOf, SyntaxKind.UnionType);
+			return this.joinTypesAsDiscriminatedUnion(type, type.oneOf, mode);
 		}
 		else {
 			// this must be a type alias because it has a name but is not a record or an enum.
 			if (codeGenConfig.modelIntfDir && mode === 'intf') {
 				const me = this.resolveType(type, 'anon');
-				return this.typeToNamedAliasType(type, this.tsTypeToText(me));
+				if (me)
+					return this.typeToNamedAliasType(type, this.tsTypeToText(me));
 			}
 		}
 		return undefined;
 	}
+
+	/**
+	 * Must match exactly one (and only one) type.
+	 * This is similar to SyntaxKind.UnionType but it can belong to only *one* of the sets.
+	 * This cannot be enforced in typescript, so we try to find a 'discriminator' in any parent.
+	 *	    Pet:
+	 *	      type: object
+	 *	      required:
+	 *	        - petType
+	 *	      properties:
+	 *	        petType:
+	 *	          type: string
+	 *	      discriminator:
+	 *	        propertyName: petType
+	 *		interface Pet {
+	 *			petType: string;
+	 *		}
+	 * Failing that, we try to find a common name between the two each of which has a single and unique literal or enum value.
+	 * Still looks the same if there is no shared parent, just doesn't 'extend' Pet, but otherwise still has the shared common / unique enum.
+	 *		interface Cat extends Pet {
+	 *			petType: 'Cat';
+	 *			huntingSkill: 'clueless' | 'lazy' | 'adventurous' | 'aggressive';
+	 *		}
+	 *		interface Dog extends Pet {
+	 *			petType: 'Dog';
+	 *			packSize: number;
+	 *		}
+	 *		type CatDog = Cat | Dog
+	 * Ultimately we fall back to '|' if we cannot discriminate, and it becomes the validator's problem.
+	 * 		type CatDog = Cat | Dog
+	 */
+	protected joinTypesAsDiscriminatedUnion(derivedType: TypeSchema, types: TypeSchema[], mode: 'intf' | 'impl' | 'anon') {
+		// We need to first recursively resolve all the types that are used to compose this one (but we ignore schema that have no type as they are not really schema).
+		const tsTypes = types.filter(e => e.oae.type).map(e => this.resolveType(e, mode));
+		const tsTxts = tsTypes.map(e => this.tsTypeToText(e));
+		let sep = ' | ';
+		let retVal: Node;
+		if (derivedType.name)
+			retVal = this.typeToNamedAliasType(derivedType, tsTxts.join(sep));
+		else
+			retVal = this.typeToInlineType(derivedType, tsTxts.join(sep), tsTypes.length > 1 ? SyntaxKind.UnionType : SyntaxKind.TypeReference);
+		if (retVal)
+			types.filter(e => e.oae.type).forEach(t => t && this.importModelIfNotSameFile(retVal, t));
+		return retVal;
+	}
+
+	/**
+	 * Matches one (or more) of several types (aka '|').
+	 * mathematical union where an element can belong to any one (or more) of the sets.
+	 */
+	protected joinTypesAsUnion(derivedType: TypeSchema, types: TypeSchema[], mode: 'intf' | 'impl' | 'anon') {
+		// We need to first recursively resolve all the types that are used to compose this one (but we ignore schema that have no type as they are not really schema).
+		const tsTypes = types.filter(e => e.oae.type).map(e => this.resolveType(e, mode));
+		const tsTxts = tsTypes.map(e => this.tsTypeToText(e));
+		let sep = ' | ';
+		let retVal: Node;
+		if (derivedType.name)
+			retVal = this.typeToNamedAliasType(derivedType, tsTxts.join(sep));
+		else
+			retVal = this.typeToInlineType(derivedType, tsTxts.join(sep), tsTypes.length > 1 ? SyntaxKind.UnionType : SyntaxKind.TypeReference);
+		if (retVal)
+			types.filter(e => e.oae.type).forEach(t => t && this.importModelIfNotSameFile(retVal, t));
+		return retVal;
+	}
+
+	/**
+	 * Combine multiple types where the resulting type satisfies all the combined types.
+	 * When each is its own type, we should use type= and '&', but when one (or more) is ref and *one* is inline, we use Foo 'extends' the others and add the Foo inline literal.
+	 * mathematical intersection where an element must belong to all sets.
+	 */
+	protected joinTypesAsIntersection(derivedType: TypeSchema, types: TypeSchema[], mode: 'intf' | 'impl' | 'anon') {
+		// We need to first recursively resolve all the types that are used to compose this one (but we ignore schema that have no type as they are not really schema).
+		const tsTypes = types.filter(e => e.oae.type).map(e => this.resolveType(e, mode));
+		const tsTxts = tsTypes.map(e => this.tsTypeToText(e));
+		let sep = ' & ';
+		let retVal: Node;
+		if (derivedType.name)
+			retVal = this.typeToNamedAliasType(derivedType, tsTxts.join(sep));
+		else
+			retVal = this.typeToInlineType(derivedType, tsTxts.join(sep), tsTypes.length > 1 ? SyntaxKind.IntersectionType : SyntaxKind.TypeReference);
+		if (retVal)
+			types.filter(e => e.oae.type).forEach(t => t && this.importModelIfNotSameFile(retVal, t));
+		return retVal;
+	};
 
 	protected typeToNamedAliasType(target: TypeSchema, typeTxt: string) {
 		const filePath = path.join(this.project.getCompilerOptions().outDir, target.getFilepath('intf')) + '.ts';
@@ -724,7 +826,8 @@ export class TsMorphGenerator extends TsMorphBase {
 		if (!alias) {
 			alias = sf.addTypeAlias({
 				name: identifier,
-				type: typeTxt
+				type: typeTxt,
+				isExported: true
 			});
 			bindAst(alias, target);
 			this.namedTypes.set(identifier, alias);
