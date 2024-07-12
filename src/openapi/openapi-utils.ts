@@ -106,7 +106,7 @@ export function hoistNamedObjectSchemas(doc: TargetOpenAPI.Document, reportMissi
 	const missingLocations: Record<string, string> = {};
 	let docPath: string[] = [];
 	function nameIfMapped(schema: TargetOpenAPI.SchemaObject, genName: string) {
-		if (schema['x-ignore'] || schema['x-ignore-client'] || schema['x-ignore-server'])
+		if (schema['x-ignore'] || schema[`x-ignore-${codeGenConfig.role}`])
 			return;
 		if (schema.title || schema['x-schema-name'])
 			return;

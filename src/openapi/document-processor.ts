@@ -2,10 +2,11 @@ import SwaggerParser from '@apidevtools/swagger-parser';
 import {map as asyncMap} from 'async';
 import * as fs from 'fs';
 import {mergeWith as lodashMergeWith, set as lodashSet, unionWith as lodashUnionWith, isEqual as lodashIsEqual, merge as lodashMerge} from 'lodash';
+import path from 'node:path';
 import {OpenAPI} from 'openapi-types';
 import {parse as json5Parse} from 'json5';
 import {TargetOpenAPI} from '../openapi-supported-versions';
-import {safeLStatSync} from '../shared';
+import {isFileSystemPath, safeLStatSync} from '../shared';
 import {hoistNamedObjectSchemas, initResolver, uplevelPaths} from './openapi-utils';
 
 export class OpenApiInputProcessor {
@@ -19,9 +20,16 @@ export class OpenApiInputProcessor {
 			const docs = await asyncMap(location, async (loc) => {
 				try {
 					const p = new SwaggerParser();
-					// if (strict)
-					// 	await p.validate(loc);
-					return await p.parse(loc);
+					const cwd = process.cwd();
+					const isLocalFile = await isFileSystemPath(loc);
+					if (isLocalFile)
+						process.chdir(path.dirname(loc));
+					try {
+						return await p.parse(loc).then(d => p.bundle(d));
+					}
+					finally {
+						process.chdir(cwd);
+					}
 				}
 				catch (e: any) {
 					if (e instanceof SyntaxError && safeLStatSync(loc)) {
@@ -49,17 +57,14 @@ export class OpenApiInputProcessor {
 						object[key.substring(1)] = srcValue;
 				}
 				else if (key?.startsWith('~')) {
-					if (object[srcValue]) {
-						// deletes.forEach(d => d());
+					if (object[srcValue])
 						lodashMergeWith(object[srcValue], object[key.substring(1)], mergerFn);
-					}
 					else if (object[key.substring(1)])
 						object[srcValue] = object[key.substring(1)];
 					deletes.push(() => {
 						delete object[key];
 						delete object[key.substring(1)];
 					});
-					// deletes.forEach(d => d());
 				}
 				else if (Array.isArray(srcValue)) {
 					if (key?.startsWith('%')) {
@@ -79,17 +84,25 @@ export class OpenApiInputProcessor {
 			deletes.forEach(d => d());
 			doc = (await parser.parse(obj)) as TargetOpenAPI.Document;
 		}
-		else
-			doc = (await parser.parse(location)) as TargetOpenAPI.Document;
+		else {
+			const cwd = process.cwd();
+			const isLocalFile = await isFileSystemPath(location);
+			if (isLocalFile)
+				process.chdir(path.dirname(location));
+			try {
+				doc = (await parser.parse(location).then((d) => parser.bundle(d))) as TargetOpenAPI.Document;
+			}
+			finally {
+				process.chdir(cwd);
+			}
+		}
 
 		if (Array.isArray(envVars))
 			envVars.forEach(d => lodashSet(doc, d, undefined));
 
-		return (await parser.bundle(doc).then(async (d) => {
-			const r = await parser.resolve(doc);
-			initResolver(r);
-			return doc;
-		})) as TargetOpenAPI.Document;
+		const r = await parser.resolve(doc);
+		initResolver(r);
+		return doc as TargetOpenAPI.Document;
 	}
 
 	async optimize(doc: TargetOpenAPI.Document, origin: string, elevate: boolean): Promise<TargetOpenAPI.Document> {

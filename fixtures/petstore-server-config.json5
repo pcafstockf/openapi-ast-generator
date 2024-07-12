@@ -3,9 +3,9 @@
 	"cmdline": {
 		"i": "./fixtures/openapi-petstore.json",
 		"r": 'server',
-		"o": "./test-out/server",
+		"o": "./test-out/server/petstore",
 		"d": "all",
-		"b": "./test-out/server/petstore.bundle.json",
+		"b": "./test-out/server/petstore/petstore.bundle.json",
 		"X": [
 			"pathdefs"
 		]

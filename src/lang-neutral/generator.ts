@@ -76,7 +76,7 @@ export class LanguageNeutralGenerator extends LanguageNeutralBase {
 	protected iteratePathItem(pattern: string, pathItem: TargetOpenAPI.PathItemObject, location: string[]) {
 		Object.keys(pathItem).filter(n => HttpMethodNames.indexOf(n.toLowerCase()) >= 0).forEach((httpMethod) => {
 			const operation = pathItem[httpMethod] as TargetOpenAPI.OperationObject;
-			if (operation['x-ignore'])
+			if (operation['x-ignore'] || operation[`x-ignore-${codeGenConfig.role}`])
 				return;
 			if (!operation.operationId)
 				operation.operationId = nameUtils.setCase(httpMethod + ' ' + pattern, 'snake');
@@ -338,14 +338,14 @@ export class LanguageNeutralGenerator extends LanguageNeutralBase {
 		const rspArgs = this.operationResponsesArgs(method.httpMethod, method.location);
 		const VisitParamFn = (p: ParameterMetaData) => {
 			const param = this.makeParameterParameter(p.location);
-			if (param.oae['x-ignore'])
+			if (param.oae['x-ignore'] || param.oae[`x-ignore-${codeGenConfig.role}`])
 				return;
 			method.parameters.push(param);
 			this.visitParameterBaseObject(param.oae, p.location);
 		};
 		const VisitReqBodyFn = (b: RequestBodyMetaData) => {
 			const param = this.makeParameterRequestBody(b.location, b.name, b.preferredMediaTypes);
-			if (param.oae['x-ignore'])
+			if (param.oae['x-ignore'] || param.oae[`x-ignore-${codeGenConfig.role}`])
 				return;
 			method.parameters.push(param);
 			this.visitParameterBaseObject(param.oae as TargetOpenAPI.ParameterBaseObject, b.location);
