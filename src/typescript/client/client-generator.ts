@@ -374,9 +374,18 @@ export class TsClientGenerator extends TsMorphBase {
 			});
 			if (!writer.isLastNewLine())
 				writer.newLine();
-			writer.write('if (hdrsOrRsp && typeof hdrsOrRsp === ').quote('object').write(')').indent().writeLine(`Object.keys(hdrsOrRsp).forEach(v => {`)
+			writer.writeLine('if (hdrsOrRsp) {').indent();
+			writer.indent().write('if (typeof hdrsOrRsp === ').quote('object').write(')');
+			writer.indent().indent().writeLine(`Object.keys(hdrsOrRsp).forEach(v => {`)
 				.writeLine(`$localHdrs[v.toLowerCase()] = hdrsOrRsp[v];`)
 				.writeLine(`});`);
+			writer.indent().write('else if (typeof hdrsOrRsp === ').quote('string').write(') {');
+			writer.indent().indent().writeLine(`rsp = hdrsOrRsp;`);
+			writer.indent().indent().write(`hdrsOrRsp = undefined;`);
+			writer.indent().writeLine('}');
+			writer.writeLine('}');
+			writer.writeLine('else');
+			writer.indent().write('rsp = ').quote('body').write(';');
 			const queryParams = m.parameters.filter(p => p.nodeKind === 'parameter' && p.oae.in === 'query');
 			writer.writeLine('const $queryParams = [];');
 			if (queryParams.length > 0) {

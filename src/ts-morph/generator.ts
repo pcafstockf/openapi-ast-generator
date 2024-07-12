@@ -573,7 +573,7 @@ export class TsMorphGenerator extends TsMorphBase {
 				case 'object':
 					// Not named, so it is either a type literal (aka inline interface) or an object literal (inline object).
 					// Further, we don't support object literals, because openapi could not specify their values.  Yes schema have default values, but that is not the same as a const object literal.
-					if (mode === 'intf') {
+					if (mode !== 'impl') {
 						const intf = this.typeToInlineType(type, '{}', SyntaxKind.TypeLiteral);
 						(type as RecordSchema).properties.forEach((v, k) => {
 							this.importModelIfNotSameFile(intf, v);

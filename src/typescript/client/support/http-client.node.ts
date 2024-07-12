@@ -198,14 +198,14 @@ export class NodeHttpClient implements HttpClient {
 	}
 }
 
-export function makeNodeHttpClient(opts?: HttpClientOptsType): HttpClient {
+export function makeNodeHttpClient(opts?: Partial<HttpClientOptsType>): HttpClient {
 	// We do not want to allow alterations of either the opts the caller provided, nor our own default opts.
-	let o: HttpClientOptsType = {
+	let o = {
 		...(opts ?? {} as HttpClientOptsType),
 		// These will overwrite the opts the caller passed us (which we want to do here).
 		decoders: Object.assign(DefaultHttpContentOpts.decoders),
 		parsers: new Map<string | RegExp, (a: any) => any>()
-	};
+	} as HttpClientOptsType;
 	for (const [key, value] of DefaultHttpContentOpts.parsers)
 		o.parsers.set(key, value);
 	// 'o' now contains any 'opts' the caller provided, plus the default HttpContentOpts

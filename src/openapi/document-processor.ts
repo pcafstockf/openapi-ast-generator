@@ -1,7 +1,8 @@
 import SwaggerParser from '@apidevtools/swagger-parser';
-import {map as asyncMap} from 'async';
+import {mapSeries as asyncMapSeries} from 'async';
 import * as fs from 'fs';
 import {mergeWith as lodashMergeWith, set as lodashSet, unionWith as lodashUnionWith, isEqual as lodashIsEqual, merge as lodashMerge} from 'lodash';
+import constants from 'node:constants';
 import path from 'node:path';
 import {OpenAPI} from 'openapi-types';
 import {parse as json5Parse} from 'json5';
@@ -17,13 +18,15 @@ export class OpenApiInputProcessor {
 		let doc: TargetOpenAPI.Document;
 		const parser = new SwaggerParser();
 		if (Array.isArray(location)) {
-			const docs = await asyncMap(location, async (loc) => {
+			const cwd = process.cwd();
+			const docs = await asyncMapSeries(location, async (loc) => {
 				try {
 					const p = new SwaggerParser();
-					const cwd = process.cwd();
 					const isLocalFile = await isFileSystemPath(loc);
-					if (isLocalFile)
+					if (isLocalFile) {
+						loc = path.resolve(loc);
 						process.chdir(path.dirname(loc));
+					}
 					try {
 						return await p.parse(loc).then(d => p.bundle(d));
 					}
@@ -32,7 +35,8 @@ export class OpenApiInputProcessor {
 					}
 				}
 				catch (e: any) {
-					if (e instanceof SyntaxError && safeLStatSync(loc)) {
+					process.chdir(cwd);
+					if ((e instanceof SyntaxError || e.errno === -constants.ENOENT) && safeLStatSync(loc)) {
 						const content = await fs.promises.readFile(loc);
 						doc = json5Parse(content.toString('utf8'));
 						if (Object.keys(doc).length > 0)
@@ -87,8 +91,10 @@ export class OpenApiInputProcessor {
 		else {
 			const cwd = process.cwd();
 			const isLocalFile = await isFileSystemPath(location);
-			if (isLocalFile)
+			if (isLocalFile) {
+				location = path.resolve(location);
 				process.chdir(path.dirname(location));
+			}
 			try {
 				doc = (await parser.parse(location).then((d) => parser.bundle(d))) as TargetOpenAPI.Document;
 			}

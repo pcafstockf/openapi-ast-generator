@@ -95,7 +95,8 @@ export class TsServerGenerator extends TsMorphBase {
 					const clazz = this.interfaceToAbsClass(i);
 					if (di) {
 						di.intfImport?.forEach(i => v.addImportDeclaration(i));
-						diSetupApis.get(api).intf = clazz;
+						if (diSetupApis.has(api))
+							diSetupApis.get(api).intf = clazz;
 						di.apiIntfTokens?.forEach(tok => {
 							let varName = interpolateBashStyle(tok.name_Tmpl, {intfName: clazz.getName(), oaeName: (clazz.$ast as ApiTag).oae.name});
 							let varInitializer = interpolateBashStyle(tok.initializer_Tmpl || '', {intfName: clazz.getName(), intfLabel: clazz.getName(), oaeName: (clazz.$ast as ApiTag).oae.name, varName: varName});
