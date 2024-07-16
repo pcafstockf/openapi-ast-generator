@@ -1,3 +1,4 @@
+import {ClientRequest} from 'http';
 import constants from 'node:constants';
 import * as http from 'node:http';
 import * as querystring from 'node:querystring';
@@ -107,13 +108,22 @@ export class NodeHttpClient implements HttpClient {
 		});
 	}
 
+	protected writeRequestBody(req: ClientRequest, body: any): void {
+		if (typeof body.pipe === 'function') {
+			body.pipe(req);
+			return;
+		}
+		req.write(body);
+	}
+
 	head(url: string, opts?: HttpOptions): Promise<HttpResponse<void>> {
 		return new Promise<HttpResponse<void>>((resolve, reject) => {
-			const req = http.request(url, {
+			const ro = {
 				method: 'HEAD',
 				headers: opts?.headers ?? undefined,
 				agent: this.clientOpts.agent
-			}, res => this.handleAsyncResponse<void>(res, resolve, reject));
+			};
+			const req = http.request(url, ro, res => this.handleAsyncResponse<void>(res, resolve, reject));
 			req.on('error', e => {
 				reject(e);
 			});
@@ -123,11 +133,12 @@ export class NodeHttpClient implements HttpClient {
 
 	get<T = any>(url: string, opts?: HttpOptions): Promise<HttpResponse<T>> {
 		return new Promise<HttpResponse<T>>((resolve, reject) => {
-			const req = http.request(url, {
+			const ro = {
 				method: 'GET',
 				headers: opts?.headers ?? undefined,
 				agent: this.clientOpts.agent
-			}, res => this.handleAsyncResponse<T>(res, resolve, reject));
+			}
+			const req = http.request(url, ro, res => this.handleAsyncResponse<T>(res, resolve, reject));
 			req.on('error', e => {
 				reject(e);
 			});
@@ -137,59 +148,69 @@ export class NodeHttpClient implements HttpClient {
 
 	post<T = any>(url: string, body?: any, opts?: HttpOptions): Promise<HttpResponse<T>> {
 		return new Promise<HttpResponse<T>>((resolve, reject) => {
-			const req = http.request(url, {
+			const ro = {
 				method: 'POST',
 				headers: opts?.headers ?? undefined,
 				agent: this.clientOpts.agent
-			}, res => this.handleAsyncResponse<T>(res, resolve, reject));
+			};
+			if (typeof body.getHeaders === 'function')
+				ro.headers = Object.assign(ro.headers ?? {}, body.getHeaders())
+			const req = http.request(url, ro, res => this.handleAsyncResponse<T>(res, resolve, reject));
 			req.on('error', e => {
 				reject(e);
 			});
 			if (body)
-				req.write(body);
+				this.writeRequestBody(req, body);
 			req.end();
 		});
 	}
 
 	put<T = any>(url: string, body?: any, opts?: HttpOptions): Promise<HttpResponse<T>> {
 		return new Promise<HttpResponse<T>>((resolve, reject) => {
-			const req = http.request(url, {
+			const ro = {
 				method: 'PUT',
 				headers: opts?.headers ?? undefined,
 				agent: this.clientOpts.agent
-			}, res => this.handleAsyncResponse<T>(res, resolve, reject));
+			};
+			if (typeof body.getHeaders === 'function')
+				ro.headers = Object.assign(ro.headers ?? {}, body.getHeaders())
+			const req = http.request(url, ro, res => this.handleAsyncResponse<T>(res, resolve, reject));
 			req.on('error', e => {
 				reject(e);
 			});
 			if (body)
-				req.write(body);
+				this.writeRequestBody(req, body);
 			req.end();
 		});
 	}
 
 	patch<T = any>(url: string, body?: any, opts?: HttpOptions): Promise<HttpResponse<T>> {
 		return new Promise<HttpResponse<T>>((resolve, reject) => {
-			const req = http.request(url, {
+			const ro = {
 				method: 'PATCH',
 				headers: opts?.headers ?? undefined,
 				agent: this.clientOpts.agent
-			}, res => this.handleAsyncResponse<T>(res, resolve, reject));
+			};
+			if (typeof body.getHeaders === 'function')
+				ro.headers = Object.assign(ro.headers ?? {}, body.getHeaders())
+			const req = http.request(url, ro, res => this.handleAsyncResponse<T>(res, resolve, reject));
 			req.on('error', e => {
 				reject(e);
 			});
 			if (body)
-				req.write(body);
+				this.writeRequestBody(req, body);
 			req.end();
 		});
 	}
 
 	delete<T = any>(url: string, opts?: HttpOptions): Promise<HttpResponse<T>> {
 		return new Promise<HttpResponse<T>>((resolve, reject) => {
-			const req = http.request(url, {
+			const ro = {
 				method: 'DELETE',
 				headers: opts?.headers ?? undefined,
 				agent: this.clientOpts.agent
-			}, res => this.handleAsyncResponse<T>(res, resolve, reject));
+			};
+			const req = http.request(url, ro, res => this.handleAsyncResponse<T>(res, resolve, reject));
 			req.on('error', e => {
 				reject(e);
 			});

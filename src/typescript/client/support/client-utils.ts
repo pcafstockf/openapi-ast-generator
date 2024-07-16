@@ -11,21 +11,21 @@ export function stringifyRequestBody(value: any, contentType: string) {
  * @param separator Separates a Key from its Value.
  * @param value The primitive, array, or object to be serialized.
  */
-export function stringifyRequestParameter(operator: string, identifier: string, delimiter: string, separator: string, value: any) {
+export function stringifyRequestParameter(identifier: string, delimiter: string, separator: string, value: any) {
 	if (Array.isArray(value)) {
 		if (delimiter === ',')
-			return operator + identifier + value.map(v => String(v)).join(delimiter);
-		return operator + value.map(v => identifier + String(v)).join(delimiter);
+			return identifier + value.map(v => String(v)).join(delimiter);
+		return value.map(v => identifier + String(v)).join(delimiter);
 	}
 	else if (typeof value === 'object' && value) {
 		if (separator.length > 1)
-			return operator + Object.keys(value).map(key => identifier + key + separator + String(value[key])).join(delimiter);
+			return Object.keys(value).map(key => identifier + key + separator + String(value[key])).join(delimiter);
 		else {
 			const trailing = Object.keys(value).map(key => key + separator + String(value[key])).join(delimiter);
 			if (separator !== '=')
-				return operator + identifier + trailing;
-			return operator + trailing;
+				return identifier + trailing;
+			return trailing;
 		}
 	}
-	return operator + identifier + String(value);
+	return identifier + String(value);
 }

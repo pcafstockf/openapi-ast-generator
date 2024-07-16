@@ -355,7 +355,7 @@ export class TsClientGenerator extends TsMorphBase {
 
 			function makeSerializeParameterTxt(p: ParameterParameter) {
 				const opts = p.serializerOptions;
-				return `stringifyRequestParameter('${opts.operator}', '${opts.identifier}', '${opts.delimiter}', '${opts.separator}', ` + p.getIdentifier() + ')';
+				return `stringifyRequestParameter('${opts.identifier}', '${opts.delimiter}', '${opts.separator}', ` + p.getIdentifier() + ')';
 			}
 
 			let pathPattern = m.pattern.replace(/{(.*?)}/g, (_, g) => '${ ' + makeSerializeParameterTxt(m.parameters.find(p => p.nodeKind === 'parameter' && p.name === g) as ParameterParameter) + '}');

@@ -4,7 +4,7 @@ import {HttpClient} from './http-client';
 /**
  * Fingerprint of a remote operation call passed to the configuration callbacks.
  */
-interface OperationDesc {
+export interface OperationDesc {
 	/**
 	 * Operation id as defined in the OpenApi specification document.
 	 */
@@ -21,7 +21,7 @@ interface OperationDesc {
 
 export interface ApiClientConfig {
 	baseURL?: string;
-	enhanceReq?: (op: OperationDesc, urlPath: string, hdrs: Record<string, string>, querys: string[]) => Promise<undefined | 'omit' | 'same-origin' | 'include'>;
+	enhanceReq?: (op: OperationDesc, urlPath: string, hdrs: Record<string, string>, querys: string[]) => Promise<void | undefined | 'omit' | 'same-origin' | 'include'>;
 	ensureAuth?: (op: OperationDesc, security: Record<string, string[]>[], urlPath: string, hdrs: Record<string, string>, querys: string[]) => Promise<void>;
 }
 

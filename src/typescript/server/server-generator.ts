@@ -23,7 +23,7 @@ export class TsServerGenerator extends TsMorphBase {
 		const apiHndlFiles: SourceFile[] = [];
 		const models: Record<string, InterfaceDeclaration> = {};
 		const diSetupApis = new Map<ApiTag, {
-			intf: ClassDeclaration,
+			intf: ClassDeclaration | InterfaceDeclaration,
 			impl: ClassDeclaration
 		}>();
 		const di = this.config.dependencyInjection ? this.config.di[this.config.dependencyInjection] : undefined;
@@ -33,8 +33,9 @@ export class TsServerGenerator extends TsMorphBase {
 					modelIntfFiles.push(i.getSourceFile());
 					models[i.getName()] = i;
 				}
-				else
+				else {
 					apiIntfFiles.push(i.getSourceFile());
+				}
 			});
 			v.getClasses().forEach((c) => {
 				if (!safeLStatSync(v.getFilePath())) {
@@ -135,7 +136,7 @@ export class TsServerGenerator extends TsMorphBase {
 			}, ``);
 			doc.createSourceFile(path.join(codeGenConfig.outputDirectory, codeGenConfig.modelIntfDir, 'index.ts'), indexTs, {overwrite: true});
 		}
-		if (di) {
+		if (di && diSetupApis.size > 0) {
 			const intfTokensExt = di.apiIntfTokens.map(i => interpolateBashStyle(i.name_Tmpl, {intfName: ''}));
 			const setupTemplate = lodashTemplate(di.apiSetup);
 			const setupTxt = setupTemplate({

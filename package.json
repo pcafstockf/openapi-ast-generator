@@ -24,18 +24,19 @@
 	"peerDependencies": {
 		"@angular/common": "~14.3.0",
 		"@angular/core": "~14.3.0",
+		"@fastify/cookie": "~9.3.1",
 		"async-injection": "~1.6.0",
 		"axios": "~1.6.8",
 		"esm-wallaby": "~3.2.30",
 		"express": "~4.19.2",
 		"express-openapi-validator": "~5.1.6",
 		"fastify": "~4.26.2",
-		"@fastify/cookie": "~9.3.1",
 		"fastify-openapi-glue": "~4.6.0",
 		"form-data": "~4.0.0",
 		"mock-json-schema": "~1.1.1",
 		"openapi-backend": "~5.10.6",
-		"reflect-metadata": "~0.2.2"
+		"reflect-metadata": "~0.2.2",
+		"dyflex-config": "~1.0.3"
 	},
 	"devDependencies": {
 		"@types/async": "~3.2.24",

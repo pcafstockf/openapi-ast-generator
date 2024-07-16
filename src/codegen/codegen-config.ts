@@ -155,11 +155,14 @@ export const TsMorphCodeGenConfig = {
 						// Really tried to avoid templating, but given the differences in DI impls, this lodash template was unavoidable.
 						// NOTE: Relative imports are more difficult to determine, so the code handles importing the Token and Class.
 						apiSetup: `import { Container } from 'async-injection';
-							export function setup(di: Container, httpClient: ApiHttpClient): void {
+							export function setup(di: Container, httpClient: ApiHttpClient, defaultConfig?: ApiClientConfig): void {
 								if (!di.isIdKnown(ApiHttpClientToken)) 
 									di.bindConstant(ApiHttpClientToken, httpClient);<% apis.forEach(function(api) { %>
-								if (!di.isIdKnown(<%- api.getIdentifier('intf') %><%- intfTokensExt %>)) 
-									di.bindClass(<%- api.getIdentifier('intf') %><%- intfTokensExt %>, <%- api.getIdentifier('impl') %>).asSingleton();<% }); %>
+								if (!di.isIdKnown(<%- api.getIdentifier('intf') %><%- intfTokensExt %>)) {
+									if (defaultConfig && (!di.isIdKnown(<%- api.getIdentifier('impl') %>Config<%- intfTokensExt %>)))
+										di.bindConstant(<%- api.getIdentifier('impl') %>Config<%- intfTokensExt %>, defaultConfig);
+									di.bindClass(<%- api.getIdentifier('intf') %><%- intfTokensExt %>, <%- api.getIdentifier('impl') %>).asSingleton();
+								}<% }); %>
 							}
 						`
 					},

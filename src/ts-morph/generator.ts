@@ -69,8 +69,9 @@ export class TsMorphGenerator extends TsMorphBase {
 	 */
 	protected importModelIfNotSameFile<S extends Node>(src: S, imphortSchema: TypeSchema) {
 		if (imphortSchema) {
-			while (imphortSchema.nodeKind === 'array')
-				imphortSchema = (imphortSchema as ArraySchema).items;
+			if (! imphortSchema.name)
+				while (imphortSchema.nodeKind === 'array')
+					imphortSchema = (imphortSchema as ArraySchema).items;
 			let children: TypeSchema[] = [];
 			const modelNode = this.resolveType(imphortSchema, 'intf');
 			if (imphortSchema.nodeKind === 'record') {
@@ -347,9 +348,12 @@ export class TsMorphGenerator extends TsMorphBase {
 			bindAst(param.getTypeNode(), types.length === 1 ? types[0] : types);
 		});
 		const returnTypes = method.responses.getAcceptableTypes();
-		const returnType = this.makeSchemasUnionType(returnTypes, 'intf').getTypeNode().print();
+		const returnType = this.makeSchemasUnionType(returnTypes, 'intf');
+		const returnTypeTxt = this.tsTypeToText(returnType);
 		returnTypes.forEach(s => s && this.importModelIfNotSameFile(intf, s));
-		intf.setReturnType(returnType);
+		if (isValidJsIdentifier(returnTypeTxt))
+			importIfNotSameFile(intf, returnType, returnTypeTxt);
+		intf.setReturnType(returnTypeTxt);
 		bindAst(intf.getReturnTypeNode(), returnTypes.length === 1 ? returnTypes[0] : returnTypes);
 
 		if (codeGenConfig.emitDescriptions) {
@@ -420,10 +424,14 @@ export class TsMorphGenerator extends TsMorphBase {
 			bindAst(param, p);
 			bindAst(param.getTypeNode(), types.length === 1 ? types[0] : types);
 		});
+
 		const returnTypes = method.responses.getAcceptableTypes();
-		const returnType = this.makeSchemasUnionType(returnTypes, 'intf').getTypeNode().print();
+		const returnType = this.makeSchemasUnionType(returnTypes, 'intf');
+		const returnTypeTxt = this.tsTypeToText(returnType);
 		returnTypes.forEach(s => s && this.importModelIfNotSameFile(impl, s));
-		impl.setReturnType(returnType);
+		if (isValidJsIdentifier(returnTypeTxt))
+			importIfNotSameFile(impl, returnType, returnTypeTxt);
+		impl.setReturnType(returnTypeTxt);
 		bindAst(impl.getReturnTypeNode(), returnTypes.length === 1 ? returnTypes[0] : returnTypes);
 		impl.addBody();
 		if (contentType)
@@ -627,18 +635,17 @@ export class TsMorphGenerator extends TsMorphBase {
 					const itemsTxt = this.tsTypeToText(items);
 					const keyName = 'Array<' + itemsTxt + '>';
 					let t = this.nativeTypes.get(keyName);
-					if (!t) {
-						// Because an array is a 'native' type, we define this genericized array in the tempFile so we can easily extract it's text (much like Date).
-						const fake = this.tempFile.addTypeAlias({
-							name: this.makeFakeIdentifier(),
-							type: 'Array'
-						});
-						bindAst(fake, type);
-						(fake.getTypeNode() as TypeReferenceNode).addTypeArgument(itemsTxt);
-						this.nativeTypes.set(keyName, fake);
-						t = fake;
-					}
-					return t;
+					if (t)
+						return t;
+					// Because an array is a 'native' type, we define this genericized array in the tempFile so we can easily extract it's text (much like Date).
+					const fake = this.tempFile.addTypeAlias({
+						name: this.makeFakeIdentifier(),
+						type: 'Array'
+					});
+					bindAst(fake, type);
+					(fake.getTypeNode() as TypeReferenceNode).addTypeArgument(itemsTxt);
+					this.nativeTypes.set(keyName, fake);
+					return fake;
 			}
 		}
 
@@ -726,7 +733,7 @@ export class TsMorphGenerator extends TsMorphBase {
 			if (codeGenConfig.modelIntfDir && mode === 'intf') {
 				const me = this.resolveType(type, 'anon');
 				if (me)
-					return this.typeToNamedAliasType(type, this.tsTypeToText(me));
+					return this.typeToNamedAliasType(type, this.tsTypeToText(me, !!type.name));
 			}
 		}
 		return undefined;
@@ -846,7 +853,7 @@ export class TsMorphGenerator extends TsMorphBase {
 		return intf;
 	}
 
-	protected tsTypeToText(tsType: Node) {
+	protected tsTypeToText(tsType: Node, preferValue?: boolean) {
 		if (typeof tsType === 'undefined')
 			return 'void';
 		if (tsType === null)
@@ -858,8 +865,12 @@ export class TsMorphGenerator extends TsMorphBase {
 			case SyntaxKind.UnionType:
 			case SyntaxKind.TypeReference:
 				return tsType.print();
-			case SyntaxKind.TypeAliasDeclaration:
+			case SyntaxKind.TypeAliasDeclaration: {
+				// We can have named aliases, or anonymous aliases.
+				if ((!preferValue) && (tsType as TypeAliasDeclaration).$ast && (tsType as TypeAliasDeclaration).$ast.name)
+					return (tsType as TypeAliasDeclaration).getName();
 				return (tsType as TypeAliasDeclaration).getTypeNode().print();
+			}
 			case SyntaxKind.EnumDeclaration:
 			case SyntaxKind.InterfaceDeclaration:
 				return (tsType as (EnumDeclaration | InterfaceDeclaration)).getName();
