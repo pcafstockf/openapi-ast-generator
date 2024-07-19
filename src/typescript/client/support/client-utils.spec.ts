@@ -1,6 +1,6 @@
 import {ParamSerializers} from './client-utils';
 
-fdescribe('StringifyParameter', () => {
+describe('StringifyParameter', () => {
 	const originalTimeout = jasmine.DEFAULT_TIMEOUT_INTERVAL;
 	beforeAll(() => {
 		jasmine.DEFAULT_TIMEOUT_INTERVAL = 60000;

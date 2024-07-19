@@ -103,14 +103,28 @@ export class NodeHttpClient implements HttpClient {
 					resolve(rsp as HttpResponse<T>);
 				}).catch(e => reject(e));
 			}
-			else
+			else if (rsp.status < 399)
 				resolve(rsp as HttpResponse<T>);
+			else {
+				const err: NodeJS.ErrnoException = new Error(res.statusMessage);
+				err.errno = res.statusCode;
+				err.code = res.statusMessage;
+				reject(err);
+			}
 		});
 	}
 
 	protected writeRequestBody(req: ClientRequest, body: any): void {
 		if (typeof body.pipe === 'function') {
 			body.pipe(req);
+			return;
+		}
+		if (Buffer.isBuffer(body) || typeof body === 'string') {
+			req.write(body);
+			return;
+		}
+		if (typeof body === 'object' && body) {
+			req.write(JSON.stringify(body));
 			return;
 		}
 		req.write(body);
