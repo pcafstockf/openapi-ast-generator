@@ -11,6 +11,7 @@ import {ParameterRequestBody} from '../../lang-neutral/parameter-requestbody';
 import {interpolateBashStyle, safeLStatSync} from '../../shared';
 import {getPreDefinedHttpHeaders, importIfNotSameFile, TsMorphBase} from '../../ts-morph/base';
 import {bindAst} from '../../ts-morph/ts-morph-ext';
+import {ParamSerializers} from './support';
 
 export class TsClientGenerator extends TsMorphBase {
 	protected config = codeGenConfig.generators.tsmorph.client;
@@ -172,7 +173,7 @@ export class TsClientGenerator extends TsMorphBase {
 		const imports = ['HttpResponse', 'ApiClientConfig'];
 		if (decl instanceof ClassDeclaration) {
 			imports.push('HttpClient');
-			imports.push('stringifyRequestParameter');
+			imports.push('ParamSerializers');
 			imports.push('stringifyRequestBody');
 			if (this.config.dependencyInjection)
 				imports.push('ApiHttpClientToken');
@@ -353,50 +354,52 @@ export class TsClientGenerator extends TsMorphBase {
 				}
 			});
 
-			function makeSerializeParameterTxt(p: ParameterParameter) {
-				const opts = p.serializerOptions;
-				return `stringifyRequestParameter('${opts.identifier}', '${opts.delimiter}', '${opts.separator}', ` + p.getIdentifier() + ')';
+			function makeSerializerInvocation(p: ParameterParameter) {
+				const key = p.serializerKey;
+				if (! key)
+					throw new Error(`Invalid style/explode serialization for ${p.name}@${p.location.join('/')}`)
+				return `ParamSerializers['${key}']('${p.name}', ${p.getIdentifier()})`;
 			}
 
-			let pathPattern = m.pattern.replace(/{(.*?)}/g, (_, g) => '${ ' + makeSerializeParameterTxt(m.parameters.find(p => p.nodeKind === 'parameter' && p.name === g) as ParameterParameter) + '}');
+			let pathPattern = m.pattern.replace(/{(.*?)}/g, (_, g) => '${ encodeURIComponent(' + makeSerializerInvocation(m.parameters.find(p => p.nodeKind === 'parameter' && p.name === g) as ParameterParameter) + ')}');
 			if (pathPattern[0] !== '/')
 				pathPattern = '/' + pathPattern;
 			writer.writeLine('let $serviceUrl = `${this.config.baseURL}' + pathPattern + '`;');
 			writer.writeLine(`const $localHdrs = {};`);
-			Object.keys(pdHdrs).forEach(key => {
-				writer.write('$localHdrs[').quote(key.toLowerCase()).write('] = ').quote(pdHdrs[key]).write(';');
-			});
-			const headerParams = m.parameters.filter(p => p.nodeKind === 'parameter' && p.oae.in === 'header');
-			headerParams.forEach(p => {
-				if (!p.required)
-					writer.writeLine(`if (typeof ${p.getIdentifier()} !== 'undefined')`);
-				writer.write('$localHdrs[').quote(p.name.toLowerCase()).write('] = ' + makeSerializeParameterTxt(p as ParameterParameter) + ';');
-			});
-			if (!writer.isLastNewLine())
-				writer.newLine();
 			writer.writeLine('if (hdrsOrRsp) {').indent();
 			writer.indent().write('if (typeof hdrsOrRsp === ').quote('object').write(')');
 			writer.indent().indent().writeLine(`Object.keys(hdrsOrRsp).forEach(v => {`)
 				.writeLine(`$localHdrs[v.toLowerCase()] = hdrsOrRsp[v];`)
 				.writeLine(`});`);
-			writer.indent().write('else if (typeof hdrsOrRsp === ').quote('string').write(') {');
+			writer.indent().write('else if (typeof hdrsOrRsp === ').quote('string').write(')');
 			writer.indent().indent().writeLine(`rsp = hdrsOrRsp;`);
-			writer.indent().indent().write(`hdrsOrRsp = undefined;`);
-			writer.indent().writeLine('}');
 			writer.writeLine('}');
 			writer.writeLine('else');
 			writer.indent().write('rsp = ').quote('body').write(';');
-			const queryParams = m.parameters.filter(p => p.nodeKind === 'parameter' && p.oae.in === 'query');
+
+			Object.keys(pdHdrs).forEach(key => {
+				writer.write('$localHdrs[').quote(key.toLowerCase()).write('] = ').quote(pdHdrs[key]).write(';');
+			});
+			const headerParams = m.parameters.filter(p => p.nodeKind === 'parameter' && p.oae.in === 'header') as ParameterParameter[];
+			const queryParams = m.parameters.filter(p => p.nodeKind === 'parameter' && p.oae.in === 'query') as ParameterParameter[];
+			const cookieParams = m.parameters.filter(p => p.nodeKind === 'parameter' && p.oae.in === 'cookie') as ParameterParameter[];
+			const body = m.parameters.filter(p => p.nodeKind === 'request')[0] as ParameterRequestBody;
+			headerParams.forEach(p => {
+				if (!p.required)
+					writer.writeLine(`if (typeof ${p.getIdentifier()} !== 'undefined')`);
+				writer.write('$localHdrs[').quote(p.name.toLowerCase()).write(`] = ${json5Stringify(p.serializerKey)};`);
+			});
+			if (!writer.isLastNewLine())
+				writer.newLine();
 			writer.writeLine('const $queryParams = [];');
 			if (queryParams.length > 0) {
+				writer.writeLine(`const $addIfValid = (s) => s && $queryParams.push(encodeURIComponent(s));`);
 				queryParams.forEach(p => {
 					if (!p.required)
 						writer.writeLine(`if (typeof ${p.getIdentifier()} !== 'undefined')`);
-					writer.writeLine(`$queryParams.push(${makeSerializeParameterTxt(p as ParameterParameter)});`);
+					writer.writeLine(`$addIfValid(${makeSerializerInvocation(p)});`);
 				});
 			}
-			const cookieParams = m.parameters.filter(p => p.nodeKind === 'parameter' && p.oae.in === 'cookie');
-			const body = m.parameters.filter(p => p.nodeKind === 'request')[0] as ParameterRequestBody;
 			writer.writeLine(`const $opDesc = {id:'${m.getIdentifier()}', pattern:'${m.pattern}', method:'${m.httpMethod}'};`);
 			writer.writeLine(`let $pre: Promise<string | boolean | void> = this.config.enhanceReq ? this.config.enhanceReq($opDesc, $serviceUrl, $localHdrs, $queryParams) : Promise.resolve(${cookieParams.length > 0 ? 'true' : ''});`);
 			let sec = m.document.security ?? [];
@@ -410,10 +413,12 @@ export class TsClientGenerator extends TsMorphBase {
 					.writeLine('});')
 					.writeLine('}');
 			}
-			writer.writeLine('const $rsp = $pre.then((c) => {')
-				.writeLine('if ($queryParams.length > 0)')
-				.writeLine(`$serviceUrl += '?' + $queryParams.join('&');`)
-				.writeLine('const $opts = {} as Record<string, any>;')
+			writer.writeLine('const $rsp = $pre.then((c) => {');
+			if (queryParams.length > 0) {
+				writer.writeLine('if ($queryParams.length > 0)')
+					.writeLine(`$serviceUrl += '?' + $queryParams.join('&');`)
+			}
+			writer.writeLine('const $opts = {} as Record<string, any>;')
 				.writeLine('if (Object.keys($localHdrs).length > 0)')
 				.writeLine('$opts.headers = $localHdrs;')
 				.writeLine('if (c)')

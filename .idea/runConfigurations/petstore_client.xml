@@ -1,5 +1,8 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="petstore-client" type="NodeJSConfigurationType" application-parameters="-v -c fixtures/petstore-client-config.json5" node-parameters="--require source-map-support/register  --require ts-node/register/transpile-only " path-to-js-file="src/cli.ts" working-dir="$PROJECT_DIR$">
+    <envs>
+      <env name="JASMINE_CONFIG_PATH" value="jasmine.json" />
+    </envs>
     <method v="2" />
   </configuration>
 </component>
