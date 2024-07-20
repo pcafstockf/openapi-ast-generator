@@ -136,7 +136,7 @@ export class TsMorphGenerator extends TsMorphBase {
 			const txt = this.tsTypeToText(r);
 			this.importModelIfNotSameFile(intf, v);
 			const prop = intf.addProperty({
-				name: rec.propertyIdentifier(k),
+				name: k,
 				hasQuestionToken: !rec.propertyIsRequired(k),
 				type: txt
 			});
@@ -586,7 +586,7 @@ export class TsMorphGenerator extends TsMorphBase {
 						(type as RecordSchema).properties.forEach((v, k) => {
 							this.importModelIfNotSameFile(intf, v);
 							intf.addProperty({
-								name: (type as RecordSchema).propertyIdentifier(k),
+								name: k,
 								hasQuestionToken: !(type as RecordSchema).propertyIsRequired(k),
 								type: this.tsTypeToText(this.resolveType(v, 'intf'))
 							});

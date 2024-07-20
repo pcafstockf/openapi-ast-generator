@@ -209,10 +209,6 @@ export class RecordSchema extends TypeSchema {
 		return resolveIfRef<OpenAPISchemaObject>(this.oae.properties?.[oaName]).obj;
 	}
 
-	propertyIdentifier(oaName: string): string {
-		return codeGenConfig.toPropertyName(oaName);
-	}
-
 	get additionalProperties(): TypeSchema | boolean {
 		const ap = this.oae.additionalProperties;
 		if (typeof ap === 'boolean')
