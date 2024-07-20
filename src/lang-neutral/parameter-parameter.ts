@@ -82,17 +82,13 @@ export class ParameterParameter extends AbstractMethodParameter<TargetOpenAPI.Pa
 			case 'simple':
 				return `s${e ? 'e' : ''}`;
 			case 'spaceDelimited':
-				if (e)
-					return undefined;
-				return `sd`;
+				return `sd${e ? 'e' : ''}`
 			case 'pipeDelimited':
-				if (e)
-					return undefined;
-				return `pd`;
+				return `pd${e ? 'e' : ''}`
 			case 'deepObject':
-				if (e)
-					return undefined;
-				return `do`;
+				if (typeof e === 'undefined' || e)
+					return `do`;    // Can only be true (defaults to true).
+				return undefined;
 			default:
 				return undefined;
 		}

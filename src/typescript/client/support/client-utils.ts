@@ -201,6 +201,15 @@ export const ParamSerializers = Object.freeze({
 		}
 		return undefined;
 	},
+	// space-delimited-explode (this is in the 3.0 spec, but not the 3.1)
+	// n/a     n/a            color=blue&color=black&color=brown  n/a
+	sde: (name: string, value: any) => {
+		if (Array.isArray(value)) {
+			if (value.length > 0)
+				return `${name}=${value.join(`&${name}=`)}`
+		}
+		return undefined;
+	},
 	// pipe-delimited
 	// n/a     n/a            blue|black|brown                    R|100|G|200|B|150
 	pd: (_: string, value: any) => {
@@ -217,6 +226,15 @@ export const ParamSerializers = Object.freeze({
 				p += `${p ? '|' : ''}${v}|${value[v]}`;
 				return p;
 			}, '')
+		}
+		return undefined;
+	},
+	// pipe-delimited-explode (this is in the 3.0 spec, but not the 3.1)
+	// n/a     n/a            color=blue&color=black&color=brown  n/a
+	pde: (name: string, value: any) => {
+		if (Array.isArray(value)) {
+			if (value.length > 0)
+				return `${name}=${value.join(`&${name}=`)}`
 		}
 		return undefined;
 	},
