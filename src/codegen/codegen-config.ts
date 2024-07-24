@@ -59,9 +59,12 @@ export const BaseCodeGenConfig = {
 	target: 'browser' as 'browser' | 'node' | 'any',
 	emitDescriptions: true,
 	generators: {} as Record<string, any>,
-	xSchemaNaming: {
-		aliasMap: undefined as Record<string, any>,
-		nameMap: undefined as Record<string, any>
+
+	plugins: {
+		recase: {
+			varcharRe: undefined as string,
+			casing: 'snake' as ('snake' | 'camel')
+		}
 	}
 };
 

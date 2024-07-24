@@ -4,11 +4,11 @@ type RefResolverFn<T = any> = (obj: any) => { obj: T, ref?: string };
 
 // noinspection JSUnusedGlobalSymbols
 export default function consolidateQueryParams(doc: OpenAPIV3.Document | OpenAPIV3_1.Document, refResolver: RefResolverFn, cmdArgs: Record<string, any>, codeGenConfig: any): Promise<void> {
-	for (let path in doc.paths) {
-		path = refResolver(path).obj;
-		for (let method in doc.paths[path]) {
+	for (let upath in doc.paths) {
+		upath = refResolver(upath).obj;
+		for (let method in doc.paths[upath]) {
 			method = refResolver(method).obj;
-			const operation = doc.paths[path][method];
+			const operation = doc.paths[upath][method];
 			if (operation.parameters) {
 				const queryRequired: Record<string, boolean> = {};
 				// Find all obj[prop] style parameters
