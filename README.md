@@ -87,12 +87,11 @@ Please factor that into your decisions, because I'm not committing to anything o
 Contributions and suggestions welcome!
 
 ## Next Steps
-* There are a few todos WRT how the client decides to submit data.
+* Generate JSON Type Definition schema for models (e.g. Ajv usable).
 * Thinking about splitting into two tools.
   * First would bundle / optimize the document, and ouput languager-neutral `CodeGenAst` (as json).
   * Second would take output of the first and produce TypeScript client / server.
   * This would **perhaps** make Java and C++ generators easier to build.
-* I may take a little time to look at fast-json and fast-json-stringify in the client.
 * Webpacking this project to a single file standalone cli tool (or two) is high on my list.  
 * Once 1.0 is released, perhaps a version 2 will support a Java Jakarta EE server and a C++ client.
 
