@@ -63,7 +63,7 @@ export function processApiResult<T>(req: FastifyRequest, result: Promise<HttpRes
 		return result.then(r => {
 			if (r) {
 				if (r.headers && typeof r.headers === 'object')
-					res.headers(r.headers);
+					res.headers(r.headers as any);
 				res.status(r.status ?? 200);
 				if (typeof r.data === 'undefined')
 					return res.send();

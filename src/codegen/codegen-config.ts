@@ -1,3 +1,4 @@
+import {mergeConfig} from 'dyflex-config';
 import {cloneDeep, merge, mergeWith} from 'lodash';
 import {IndentationText, NewLineKind, QuoteKind, ScriptTarget} from 'ts-morph';
 import {interpolateBashStyle} from '../shared';
@@ -13,6 +14,7 @@ export const BaseCodeGenConfig = {
 	modelIntfDir: 'models',  // if truthy, generate model interfaces
 	modelImplDir: null as string,  // if truthy, generate model classes
 	modelPrivDir: null as string,  // if falsy, modelImplDir will be used when/if needed.
+	modelSchemaDir: null as string,  // if truthy, json schema (for 3.x specs will be written to this directory).
 	apiIntfDir: 'apis',  // if truthy, generate api interfaces
 	apiImplDir: 'services',  // if truthy, generate api classes
 	apiPrivDir: null as string, // if falsy, apiImplDir will be used when/if needed.
@@ -56,7 +58,7 @@ export const BaseCodeGenConfig = {
 	apiImplFileBasename_Tmpl: null as string,
 
 	role: 'client' as 'client' | 'server',
-	target: 'browser' as 'browser' | 'node' | 'any',
+	target: 'browser' as 'browser' | 'node' | undefined,
 	emitDescriptions: true,
 	generators: {} as Record<string, any>,
 
@@ -77,9 +79,10 @@ export const ClientCodeGenConfig = {
 			'multipart/form-data',
 			'application/octet-stream',
 			'text/plain',
-			'application/json'
+			'application/json',
+			'application/xml'
 		],
-		// Keep in mind that every response will be processed by the http-client, this simply helps define the 'body' response type.
+		// Keep in mind that every response will be processed by the http-client, this simply helps define the preferred 'body' response type.
 		acceptMediaTypes: [
 			'application/octet-stream',
 			'application/json',
@@ -88,7 +91,6 @@ export const ClientCodeGenConfig = {
 		libs: {
 			xml: undefined
 		},
-		httplib: 'fetch' as unknown as ('fetch' | 'node' | 'axios' | 'angular')
 	}
 };
 
@@ -116,9 +118,11 @@ export const TsMorphCodeGenConfig = {
 					// Source files to be copied into the internal support directory.
 					// Path should be relative to 'srcDirName'
 					files: [
-						`client-utils.ts`,
+						`client-types.ts`,
+						{'client-request.ts': `client-request#{target}.ts`},
+						`client-config.ts`,
+						`param-serializers.ts`,
 						`http-client.ts`,
-						`http-client.#{lib}.ts`,
 						`index.ts`,
 					]
 				},
@@ -496,5 +500,5 @@ function CodeGenConfig() {
 export type CodeGenConfig<T extends BaseCodeGenConfigType = BaseCodeGenConfigType> = T & ReturnType<typeof CodeGenConfig>;
 
 export function makeCodeGenConfig<T extends BaseCodeGenConfigType = BaseCodeGenConfigType>(config?: T): CodeGenConfig {
-	return Object.setPrototypeOf(CodeGenConfig(), merge(DefaultCodeGenConfig, config));
+	return Object.setPrototypeOf(CodeGenConfig(), mergeConfig(DefaultCodeGenConfig, config));
 }

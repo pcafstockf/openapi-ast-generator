@@ -207,9 +207,9 @@ export async function prepare(args: CLIOptionsType) {
 	globalThis.codeGenConfig.outputDirectory = path.resolve(config.cmdLine.o);
 
 	// Clean up anything previously generated (if requested to do so).
-	if (config.cmdLine.d === 'all')
-		rimrafSync(config.cmdLine.o, {recursive: true, force: true});
-	else if (config.cmdLine.d) {
+	if (config.cmdLine.d) {
+		if (config.cmdLine.d === 'all')
+			rimrafSync(config.cmdLine.o, {recursive: true, force: true});   // This may make all the follow statements irrelevant, but not necessarily.
 		if (globalThis.codeGenConfig.modelIntfDir)
 			rimrafSync(path.join(config.cmdLine.o, globalThis.codeGenConfig.modelIntfDir), {recursive: true, force: true});
 		if (globalThis.codeGenConfig.modelImplDir)

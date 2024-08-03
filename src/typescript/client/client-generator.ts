@@ -11,9 +11,9 @@ import {ParameterRequestBody} from '../../lang-neutral/parameter-requestbody';
 import {interpolateBashStyle, safeLStatSync} from '../../shared';
 import {getPreDefinedHttpHeaders, importIfNotSameFile, TsMorphBase} from '../../ts-morph/base';
 import {bindAst} from '../../ts-morph/ts-morph-ext';
-import {ParamSerializers} from './support';
 
 export class TsClientGenerator extends TsMorphBase {
+	protected codeGenTarget = codeGenConfig.target;
 	protected config = codeGenConfig.generators.tsmorph.client;
 
 	generate(doc: Project): Project {
@@ -151,13 +151,16 @@ export class TsClientGenerator extends TsMorphBase {
 		mkdirSync(internalDir, {recursive: true});
 		this.config.support.files.forEach(fp => {
 			let dstBase: string;
+			const opts =  {
+				target: this.codeGenTarget ? `.${this.codeGenTarget}` : ''
+			};
 			if (typeof fp === 'object') {
 				const key = Object.keys(fp)[0];
-				fp = interpolateBashStyle(fp[key], {lib: this.config.httplib ?? 'fetch'})
+				fp = interpolateBashStyle(fp[key], opts)    // Default to none
 				dstBase = path.basename(key);
 			}
 			else {
-				fp = interpolateBashStyle(fp, {lib: this.config.httplib ?? 'fetch'});
+				fp = interpolateBashStyle(fp, opts);    // Default to none
 				dstBase = path.basename(fp);
 			}
 			const srcFilePath = path.normalize(path.join(this.config.support.srcDirName, fp));
@@ -173,8 +176,7 @@ export class TsClientGenerator extends TsMorphBase {
 		const imports = ['HttpResponse', 'ApiClientConfig'];
 		if (decl instanceof ClassDeclaration) {
 			imports.push('HttpClient');
-			imports.push('ParamSerializers');
-			imports.push('stringifyRequestBody');
+			imports.push('HttpOptions');
 			if (this.config.dependencyInjection)
 				imports.push('ApiHttpClientToken');
 		}
@@ -187,8 +189,8 @@ export class TsClientGenerator extends TsMorphBase {
 	protected makeConstructor(c: ClassDeclaration) {
 		const impl = c.addConstructor({
 			parameters: [
-				{name: 'httpClient', type: 'HttpClient', scope: Scope.Protected},
-				{name: 'config', type: 'ApiClientConfig', hasQuestionToken: true, scope: Scope.Protected}
+				{name: 'http', type: 'HttpClient', isReadonly: true, scope: Scope.Protected},
+				{name: 'config', type: 'ApiClientConfig', isReadonly: true, scope: Scope.Protected}
 			]
 		});
 		const di = this.config.dependencyInjection ? this.config.di[this.config.dependencyInjection] : undefined;
@@ -343,25 +345,27 @@ export class TsClientGenerator extends TsMorphBase {
 	protected populateMethodBody(impl: MethodDeclaration) {
 		const m = impl.$ast;
 		const pdHdrs = getPreDefinedHttpHeaders(impl) || {};  // A method with no body returning void will probably not have any predefined headers.
+		const bodyMimeType = pdHdrs['content-type'];
+		delete pdHdrs['content-type'];
 		impl.setBodyText((writer) => {
 			m.parameters.forEach((p) => {
 				if (p.required) {
 					let nullable = p.nodeKind === 'parameter' ? p.type.isNullable : p.resolveTypes().some(t => t.isNullable);
 					if (nullable)
-						writer.write(`if (typeof ${p.getIdentifier()} === 'undefined')`).writeLine(`throw new Error('Required parameter is undefined');`);
+						writer.write(`if (typeof ${p.getIdentifier()} === 'undefined')`).writeLine(`throw new Error('Required parameter "${p.getIdentifier()}" is undefined');`);
 					else
-						writer.write(`if (${p.getIdentifier()} === null || typeof ${p.getIdentifier()} === 'undefined')`).writeLine(`throw new Error('Required parameter is null/undefined');`);
+						writer.write(`if (${p.getIdentifier()} === null || typeof ${p.getIdentifier()} === 'undefined')`).writeLine(`throw new Error('Required parameter "${p.getIdentifier()}" is null/undefined');`);
 				}
 			});
 
-			function makeSerializerInvocation(p: ParameterParameter) {
+			function makeSerializerInvocation(p: ParameterParameter, arg?: string | boolean) {
 				const key = p.serializerKey;
 				if (! key)
 					throw new Error(`Invalid style/explode serialization for ${p.name}@${p.location.join('/')}`)
-				return `ParamSerializers['${key}']('${p.name}', ${p.getIdentifier()})`;
+				return `this.config.paramSerializers?.['${key}'](${p.getIdentifier()}, ${typeof arg === 'string' ? "'" + arg + "'" : arg}) ?? ''`;
 			}
 
-			let pathPattern = m.pattern.replace(/{(.*?)}/g, (_, g) => '${ encodeURIComponent(' + makeSerializerInvocation(m.parameters.find(p => p.nodeKind === 'parameter' && p.name === g) as ParameterParameter) + ')}');
+			let pathPattern = m.pattern.replace(/{(.*?)}/g, (_, g) => '${' + makeSerializerInvocation(m.parameters.find(p => p.nodeKind === 'parameter' && p.name === g) as ParameterParameter, true) + '}');
 			if (pathPattern[0] !== '/')
 				pathPattern = '/' + pathPattern;
 			writer.writeLine('let $serviceUrl = `${this.config.baseURL}' + pathPattern + '`;');
@@ -376,6 +380,7 @@ export class TsClientGenerator extends TsMorphBase {
 			writer.writeLine('}');
 			writer.writeLine('else');
 			writer.indent().write('rsp = ').quote('body').write(';');
+			writer.newLine();
 
 			Object.keys(pdHdrs).forEach(key => {
 				writer.write('$localHdrs[').quote(key.toLowerCase()).write('] = ').quote(pdHdrs[key]).write(';');
@@ -387,52 +392,72 @@ export class TsClientGenerator extends TsMorphBase {
 			headerParams.forEach(p => {
 				if (!p.required)
 					writer.writeLine(`if (typeof ${p.getIdentifier()} !== 'undefined')`);
-				writer.write('$localHdrs[').quote(p.name.toLowerCase()).write(`] = ${json5Stringify(p.serializerKey)};`);
+				writer.write('$localHdrs[').quote(p.name.toLowerCase()).write(`] = ${makeSerializerInvocation(p, false)};`);
 			});
 			if (!writer.isLastNewLine())
 				writer.newLine();
-			writer.writeLine('const $queryParams = [];');
+			// JavaScript code in the browser has no control over cookie values, or even which cookies are sent, but node does.
+			if (this.codeGenTarget !== 'browser') {
+				writer.writeLine('const $cookies: Record<string, () => string> = {};');
+				if (cookieParams.length > 0) {
+					cookieParams.forEach(p => {
+						if (!p.required)
+							writer.writeLine(`if (typeof ${p.getIdentifier()} !== 'undefined')`);
+						writer.write(`$cookies[`).quote(p.name).write(`] = () => ${makeSerializerInvocation(p, p.name)};`);
+					});
+				}
+			}
 			if (queryParams.length > 0) {
-				writer.writeLine(`const $addIfValid = (s) => s && $queryParams.push(encodeURIComponent(s));`);
+				writer.writeLine('const $queries = [];');
+				writer.writeLine(`const $addQueryIfValid = (s) => s && $queries.push(s);`);
 				queryParams.forEach(p => {
 					if (!p.required)
 						writer.writeLine(`if (typeof ${p.getIdentifier()} !== 'undefined')`);
-					writer.writeLine(`$addIfValid(${makeSerializerInvocation(p)});`);
+					writer.writeLine(`$addQueryIfValid(${makeSerializerInvocation(p, p.name)});`);
 				});
+				writer.writeLine('if ($queries.length > 0)')
+					.writeLine(`$serviceUrl += '?' + $queries.join('&');`);
 			}
 			writer.writeLine(`const $opDesc = {id:'${m.getIdentifier()}', pattern:'${m.pattern}', method:'${m.httpMethod}'};`);
-			writer.writeLine(`let $pre: Promise<string | boolean | void> = this.config.enhanceReq ? this.config.enhanceReq($opDesc, $serviceUrl, $localHdrs, $queryParams) : Promise.resolve(${cookieParams.length > 0 ? 'true' : ''});`);
+			if (body) {
+				writer.write(`const $body = this.config.bodySerializer ? this.config.bodySerializer($opDesc, $serviceUrl, `).quote(bodyMimeType).write(`, ${body.getIdentifier()}, $localHdrs) : ${body.getIdentifier()};`);
+				writer.newLine();
+			}
+			writer.write(`let $pre = this.config.enhanceReq ? this.config.enhanceReq($opDesc, $serviceUrl, $localHdrs`);
+			if (this.codeGenTarget === 'browser')
+				writer.write(`) : Promise.resolve(${cookieParams.length > 0 ? 'true' : ''});`);
+			else
+				writer.write(`, $cookies) : Promise.resolve($cookies);`);
+
 			let sec = m.document.security ?? [];
 			if (Array.isArray(m.oae.security))
 				sec = m.oae.security;
 			if (sec.length > 0) {
 				writer.writeLine('if (this.config.ensureAuth) {')
 					.writeLine(`const $security = ${json5Stringify(sec)};`)
-					.writeLine(`$pre = $pre.then(c => {`)
-					.writeLine(`return this.config.ensureAuth($opDesc, $security, $serviceUrl, $localHdrs, $queryParams).then(() => c);`)
-					.writeLine('});')
+					.writeLine(`$pre = $pre.then(c => this.config.ensureAuth($opDesc, $security, $serviceUrl, $localHdrs, c));`)
 					.writeLine('}');
 			}
 			writer.writeLine('const $rsp = $pre.then((c) => {');
-			if (queryParams.length > 0) {
-				writer.writeLine('if ($queryParams.length > 0)')
-					.writeLine(`$serviceUrl += '?' + $queryParams.join('&');`)
+			writer.writeLine('const $opts = {} as HttpOptions;')
+			if (this.codeGenTarget === 'browser') {
+				writer.writeLine('if (c)')
+					.writeLine('$opts.credentials = c;')
 			}
-			writer.writeLine('const $opts = {} as Record<string, any>;')
-				.writeLine('if (Object.keys($localHdrs).length > 0)')
-				.writeLine('$opts.headers = $localHdrs;')
-				.writeLine('if (c)')
-				.writeLine('$opts.credentials = c;')
-				.write('return this.httpClient.')
-				.write(m.httpMethod.toLowerCase())
-				.write('(')
-				.write('$serviceUrl,');
-			if (body) {
-				let secondParam = `$localHdrs['content-type']`;
-				if (!pdHdrs['content-type'])
-					secondParam += ` || 'application/json'`;
-				writer.write(`stringifyRequestBody(${body.getIdentifier()}, ${secondParam}), `);
+			else {
+				writer.writeLine(`const $cookieEncoders = Object.values(c)`);
+				writer.writeLine('if ($cookieEncoders.length > 0)')
+					.write(`$localHdrs[`).quote('cookie').write(`] = ($localHdrs[`).quote('cookie').write(`] ? ($localHdrs[`).quote('cookie').write(`] + '; ') : '') + $cookieEncoders.map(fn => fn()).join('; ');`)
+					.newLine();
 			}
+			writer.writeLine('if (Object.keys($localHdrs).length > 0)')
+				.writeLine('$opts.headers = $localHdrs;');
+			writer.write('return this.http.')
+			.write(m.httpMethod.toLowerCase())
+			.write('(')
+			.write('$serviceUrl,');
+			if (body)
+				writer.write(`$body,`);
 			writer.write('$opts);');
 			writer.writeLine('});');
 			writer.write('if (rsp !== \'http\')').indent().writeLine('return $rsp.then(r => r.data as any);');

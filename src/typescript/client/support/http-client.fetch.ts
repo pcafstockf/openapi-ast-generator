@@ -32,16 +32,9 @@ class FetchHttpClient implements HttpClient {
 
 	protected sendRequest<T>(method: string, url: string, opts?: HttpOptions, body?: any) {
 		const options: RequestInit = {
-			method,
-			headers: undefined,
-			credentials: opts?.credentials ? 'include' : 'omit',
-			body: body
+			method
 		};
-		if (typeof opts?.credentials === 'boolean')
-			options.credentials = opts?.credentials ? 'include' : 'omit';
-		else
-			options.credentials = opts?.credentials as RequestCredentials;
-		if (opts.headers)
+		if (typeof opts?.headers !== 'undefined')
 			options.headers = Object.keys(opts.headers).reduce((acc, key) => {
 				if (Array.isArray(opts.headers[key]))
 					acc[key] = (opts.headers[key] as string[]).join(',');
@@ -49,31 +42,72 @@ class FetchHttpClient implements HttpClient {
 					acc[key] = opts.headers[key] as unknown as string;
 				return acc;
 			}, opts.headers as unknown as Record<string, string>);
+		if (typeof body !== 'undefined')
+			options.body = body;
+		if (typeof opts?.credentials === 'boolean')
+			options.credentials = opts?.credentials ? 'include' : 'omit';
+		else if (typeof opts?.credentials === 'string')
+			options.credentials = opts?.credentials as RequestCredentials;
 		return fetch(url, options);
 	}
 
-	protected processResponse<T>(rsp: Response) {
+	protected async processResponse<T>(rsp: Response) {
 		const retVal: Writeable<HttpResponse<T>> = {
 			status: rsp.status,
 		};
-		rsp.headers.forEach((val, key) => {
+		rsp.headers.forEach((v, k) => {
 			if (!retVal.headers)
 				retVal.headers = {};
-			retVal.headers[key] = val;
+			const lk = k.toLowerCase();
+			let val = retVal.headers[lk];
+			if (typeof val === 'string')
+				val = [val];
+			else if (Array.isArray(val))
+				val.push(v);
+			else
+				val = v;
+			retVal.headers[lk] = val;
 		});
-		switch (rsp['content-type']) {
-			case 'application/octet-stream':
-				retVal.data = rsp.arrayBuffer() as T;
+		if (rsp.ok) {
+			let contentType = retVal.headers['content-type'] as string;
+			if (contentType) {
+				const semi = contentType.indexOf(';');
+				if (semi > 0)   // We assume fetch.Response is intelligent enough to detect content-type params.
+					contentType = contentType.substring(0, semi);
+		switch (contentType) {
+			case "application/json":
+			case "application/ld+json":
+				retVal.data = await rsp.json() as T;
 				break;
-			case 'application/json':
-				retVal.data = rsp.json() as T;
+			case "multipart/form-data":
+				retVal.data = await rsp.formData() as T;
 				break;
-			case 'text/plain':
-				retVal.data = rsp.text() as T;
+			case "application/x-www-form-urlencoded":
+				const txt = await rsp.text();
+				retVal.data = new URLSearchParams(txt) as T;
 				break;
-			default:
-				retVal.data = (/text\/.+/.test(rsp['content-type']) ? rsp.text() : rsp.arrayBuffer()) as T;
-				break;
+			default: {
+				if (contentType.startsWith("application/")) {
+					switch (contentType) {
+						case "application/xml":
+						case "application/xhtml+xml":
+						case "application/javascript":
+							retVal.data = await rsp.text() as T;
+							break;
+						default:
+							retVal.data = await rsp.blob() as T;
+							break;
+					}
+				}
+				else if (contentType.startsWith("text/"))
+					retVal.data = await rsp.text() as T;
+				else
+					retVal.data = await rsp.blob() as T;
+			}
+		}
+			}
+			else
+				retVal.data = await rsp.blob() as T;
 		}
 		return retVal;
 	}

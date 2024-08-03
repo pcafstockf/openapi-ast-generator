@@ -19,7 +19,8 @@
 		"typescript": "~5.4.5",
 		"unquoted-property-validator": "~1.1.0",
 		"uuid": "~9.0.1",
-		"yargs": "~17.7.2"
+		"yargs": "~17.7.2",
+		"dyflex-config": "~1.1.0"
 	},
 	"peerDependencies": {
 		"@angular/common": "~14.3.0",
@@ -32,11 +33,11 @@
 		"express-openapi-validator": "~5.1.6",
 		"fastify": "~4.26.2",
 		"fastify-openapi-glue": "~4.6.0",
-		"form-data": "~4.0.0",
+		"form-data-encoder": "~4.0.2",
+		"formdata-node": "~6.0.3",
 		"mock-json-schema": "~1.1.1",
 		"openapi-backend": "~5.10.6",
-		"reflect-metadata": "~0.2.2",
-		"dyflex-config": "~1.0.3"
+		"reflect-metadata": "~0.2.2"
 	},
 	"devDependencies": {
 		"@types/async": "~3.2.24",

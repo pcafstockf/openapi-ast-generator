@@ -71,6 +71,10 @@ export class OpenApiInputProcessor {
 					});
 				}
 				else if (Array.isArray(srcValue)) {
+					// Arrays starting with
+					//  '~' will be replaced (see above).
+					//  '%' will follow lodash merge semantics where elements at objValue[n] are replaced by elements at srcValue[n].
+					//  Otherwise arrays will merged with union semantics.
 					if (key?.startsWith('%')) {
 						object[key.substring(1)] = lodashMerge(object[key.substring(1)], srcValue);
 						deletes.push(() => {
