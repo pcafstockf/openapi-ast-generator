@@ -1,3 +1,6 @@
+This project has been archived in favor of a more streamlined flexible approach to the same end goal (code generation from an openapi specification).
+Please see [oag-tools](https://github.com/pcafstockf/oag-tools).
+
 # openapi-ast-generator
 
 This project is about transformations.  
